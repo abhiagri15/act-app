@@ -1,9 +1,14 @@
 import { getOrCreateProfile } from '@/app/lib/auth/profile';
+import { AppHeader } from '@/app/components/AppHeader';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   // Side effect: lazily creates act.profiles row on first authenticated request.
-  // Result is currently unused at the layout level (no header yet);
-  // sub-project #4 will introduce <AppHeader/> here and read the profile.
+  // Wrapped in cache() so this AND <AppHeader/> below collapse to one DB call.
   await getOrCreateProfile();
-  return <>{children}</>;
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <AppHeader />
+      <main>{children}</main>
+    </div>
+  );
 }
