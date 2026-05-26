@@ -6,9 +6,11 @@ import { Button } from '@/app/components/ui/button';
 // Server component. Rendered on every (app)/ page via (app)/layout.tsx.
 // Reads from the cache()-wrapped getOrCreateProfile so the layout's
 // implicit read and this header's read collapse to one DB call per request.
+// Shows the /admin link only when the profile.role is 'admin'.
 export async function AppHeader() {
   const profile = await getOrCreateProfile();
   const displayName = profile?.full_name || profile?.email || 'Student';
+  const isAdmin = profile?.role === 'admin';
   return (
     <header className="flex items-center justify-between border-b bg-white px-4 py-2.5 sm:px-5">
       <nav className="flex items-center gap-4">
@@ -21,6 +23,14 @@ export async function AppHeader() {
         >
           Analytics
         </Link>
+        {isAdmin && (
+          <Link
+            href="/admin"
+            className="text-sm text-slate-500 transition-colors hover:text-slate-900"
+          >
+            Admin
+          </Link>
+        )}
         <Link
           href="/how-it-works"
           className="text-sm text-slate-500 transition-colors hover:text-slate-900"
