@@ -15,13 +15,24 @@ pnpm dlx tsx scripts/check-format.ts
 
 ## Architecture
 
-Foundation scaffold only as of this commit. See [`docs/superpowers/specs/2026-05-26-act-app-overview-design.md`](docs/superpowers/specs/2026-05-26-act-app-overview-design.md) for the overall architecture and the 7 sub-project plan.
+Foundation + Auth shipped as of `post-auth`. See [`docs/superpowers/specs/2026-05-26-act-app-overview-design.md`](docs/superpowers/specs/2026-05-26-act-app-overview-design.md) for the overall architecture and the 7 sub-project plan; auth specifics in [`docs/superpowers/specs/2026-05-26-act-app-auth-design.md`](docs/superpowers/specs/2026-05-26-act-app-auth-design.md).
 
-Tag chain: `post-foundation` → (Auth) → (AI) → (Persistence) → (Analytics) → (Admin) → (Feedback).
+Tag chain: `post-foundation` → `post-auth` → (AI) → (Persistence) → (Analytics) → (Admin) → (Feedback).
 
 - Production deploy: https://act-app-ten.vercel.app
 - GitHub repo: https://github.com/abhiagri15/act-app
 - Supabase project: shared with sat-app (PropLedger, ref `falgykkspbtrwdcchayi`) under the `act` schema
+
+### Route groups
+
+- **`app/(auth)/`** — public auth pages (`/login`, `/register`, `/forgot-password`, `/reset-password`). Compact centered layout with ACT branding. Reachable while signed out; the middleware redirects signed-in users away from `/login` and `/register` to `/`.
+- **`app/(app)/`** — authenticated route group. `(app)/layout.tsx` calls `getOrCreateProfile()` on every render (the side effect is the point — sub-project #4 will introduce `<AppHeader/>` here and read the cached profile). The placeholder home page lives at `app/(app)/page.tsx` (moved from `app/page.tsx` in Auth).
+- **`app/auth/callback/route.ts`** — OAuth + email-link `code` exchange, then redirects into the app. Same-origin redirect guard on the `next` param.
+- **`app/how-it-works/`** — public marketing page, outside both groups.
+
+### Profile helper
+
+`getOrCreateProfile()` lives in [`app/lib/auth/profile.ts`](app/lib/auth/profile.ts), wrapped in React `cache()` so the layout's read and any page-level reads collapse to one DB call per request. Reads/writes `act.profiles` via `supabase.schema('act')`. Insert-then-reselect handles the concurrent first-load race. The `act` schema must be exposed in Supabase API settings (already done in Foundation Task 16).
 
 ## Auth gotchas
 
@@ -48,12 +59,10 @@ Tag chain: `post-foundation` → (Auth) → (AI) → (Persistence) → (Analytic
 
 - **`suppressHydrationWarning` is on `<body>` only** in `app/layout.tsx` — defense against browser extension DOM injection. Do not extend it to other elements (would hide real hydration mismatches).
 
-- **Trigger functions have mutable `search_path`** (tech debt, INFO advisory). The three trigger functions `act.set_updated_at`, `act.passages_fill_defaults`, `act.questions_fill_defaults` do not set `search_path = act, public, pg_temp`. SAT app has the same advisory. Fix in sub-project #2's first migration when SECURITY DEFINER RPCs are added.
-
-- **`act.protect_profile_role` is gratuitously `SECURITY DEFINER`** (tech debt, WARN advisory). The function is only invoked from a BEFORE INSERT/UPDATE trigger, where the security context doesn't matter. SAT's equivalent is `SECURITY INVOKER`. Fix alongside the search_path cleanup in sub-project #2's first migration: `alter function act.protect_profile_role() security invoker; revoke execute on function act.protect_profile_role() from public;`
-
 ## Foundation followups (deferred to sub-project #2 or earlier)
 
 - **Preview env vars not set on Vercel.** Vercel CLI 54.4.1 rejected `vercel env add ... preview --yes` due to a `git_branch_required` prompt that wouldn't dismiss. Production + Development env vars are set; Preview needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET` set via the dashboard or `--value` CLI form.
 
 - **GitHub auto-deploy connection failed during `vercel link`.** The Vercel project is not currently wired to push-to-deploy from the GitHub repo. Connect via Vercel dashboard → Settings → Git → "Connect Git Repository". Until then, deploys are manual (`pnpm dlx vercel --prod`).
+
+- **`.env.local` is not present locally.** All env vars live in Vercel (Production + Development). `pnpm dev` cannot exercise middleware without them. If a dev-loop workflow becomes needed, pull from Vercel: `pnpm dlx vercel env pull .env.local`.
