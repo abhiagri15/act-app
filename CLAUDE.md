@@ -15,9 +15,9 @@ pnpm dlx tsx scripts/check-format.ts
 
 ## Architecture
 
-Foundation + Auth + AI + Persistence + Analytics shipped as of `post-analytics`. See [`docs/superpowers/specs/2026-05-26-act-app-overview-design.md`](docs/superpowers/specs/2026-05-26-act-app-overview-design.md) for the overall architecture and the 7 sub-project plan; auth specifics in [`docs/superpowers/specs/2026-05-26-act-app-auth-design.md`](docs/superpowers/specs/2026-05-26-act-app-auth-design.md); persistence specifics in [`docs/superpowers/specs/2026-05-26-act-app-persistence-design.md`](docs/superpowers/specs/2026-05-26-act-app-persistence-design.md); analytics specifics in [`docs/superpowers/specs/2026-05-26-act-app-analytics-design.md`](docs/superpowers/specs/2026-05-26-act-app-analytics-design.md).
+Foundation + Auth + AI + Persistence + Analytics + Admin shipped as of `post-admin`. See [`docs/superpowers/specs/2026-05-26-act-app-overview-design.md`](docs/superpowers/specs/2026-05-26-act-app-overview-design.md) for the overall architecture and the 7 sub-project plan; auth specifics in [`docs/superpowers/specs/2026-05-26-act-app-auth-design.md`](docs/superpowers/specs/2026-05-26-act-app-auth-design.md); persistence specifics in [`docs/superpowers/specs/2026-05-26-act-app-persistence-design.md`](docs/superpowers/specs/2026-05-26-act-app-persistence-design.md); analytics specifics in [`docs/superpowers/specs/2026-05-26-act-app-analytics-design.md`](docs/superpowers/specs/2026-05-26-act-app-analytics-design.md); admin specifics in [`docs/superpowers/specs/2026-05-26-act-app-admin-design.md`](docs/superpowers/specs/2026-05-26-act-app-admin-design.md).
 
-Tag chain: `post-foundation` → `post-auth` → `post-persistence` → `post-analytics` → (Admin) → (Feedback). *(AI sub-project is between Auth and Persistence in scope but no separate tag; the AI commits sit on `main` before persistence.)*
+Tag chain: `post-foundation` → `post-auth` → `post-persistence` → `post-analytics` → `post-admin` → (Feedback). *(AI sub-project is between Auth and Persistence in scope but no separate tag; the AI commits sit on `main` before persistence.)*
 
 - Production deploy: https://act-app-ten.vercel.app
 - GitHub repo: https://github.com/abhiagri15/act-app
@@ -32,6 +32,7 @@ Tag chain: `post-foundation` → `post-auth` → `post-persistence` → `post-an
   - `(app)/test/[attemptId]/` — runner sub-tree. `layout.tsx` guards "attempt must be live" (404 / redirect on submitted/abandoned). Each section page (`english`, `math`, `break`, `reading`, `science`, `results`) calls `guardSectionRoute()` from `route-guards.ts` to enforce URL-segment-matches-current-section + force-lock-on-deadline.
   - `(app)/dashboard/attempts/[id]/` — submitted-attempt review. Lists every question grouped by section + passage, with the user's selection marked + correct answer + explanation.
   - `(app)/analytics/` — analytics page. Server component, calls `getAnalytics()` (which wraps the security-invoker `act.user_analytics()` RPC) and renders summary stats, composite trend, per-section trend, per-section accuracy, focus areas, and a per-skill breakdown. Empty state when `tests_taken === 0`. All visuals are dependency-free SVG/CSS (mirrors the SAT app).
+  - `(app)/admin/` — admin-only sub-tree. `layout.tsx` calls `requireAdmin()` (`notFound()` for non-admins — 404, not 403); renders `<AdminNav/>` above each page. Pages: `/admin` overview, `/admin/questions[/[id]]`, `/admin/passages[/[id]]`, `/admin/users[/[id]]`, `/admin/generation`, `/admin/settings`. User-detail reuses every `/analytics` visual via `getUserAnalyticsForAdmin(id)`. Daily attempt limit lives in `act.app_config` (single-row table); the form is on `/admin/settings`.
 - **`app/auth/callback/route.ts`** — OAuth + email-link `code` exchange, then redirects into the app. Same-origin redirect guard on the `next` param.
 - **`app/how-it-works/`** — public marketing page, outside both groups.
 
@@ -99,6 +100,33 @@ Tag chain: `post-foundation` → `post-auth` → `post-persistence` → `post-an
 - **`focusAreas` requires ≥ 5 attempts per skill.** A user who missed 1/1 on some skill shouldn't see it ranked as their #1 weakness — the 5-attempt floor smooths that out. `FocusAreas` renders nothing when no skill clears the bar, which keeps the section header from appearing on the very first attempt. If you tune the threshold, also update the assertion in `scripts/check-analytics.ts`.
 
 - **Visual components are plain (non-client) components.** `ScoreTrend`, `SectionTrend`, `SectionAccuracy`, `SkillAccuracy`, `FocusAreas`, `SummaryStats` all render props -> SVG/CSS only. No hooks, no `'use client'`, no charting library. `/analytics` is a server component; keep these dependency-free and server-renderable.
+
+## Admin sub-project (sub-project #6) gotchas
+
+The admin sub-project has landed: `/admin` is a role-gated subtree that lets an
+admin moderate the AI-generated pool (questions + passages), view per-user
+analytics, watch the generation log, and edit the app-wide daily test-attempt
+limit.
+
+- **`/admin` is gated twice — by the layout AND inside every admin server action.** `app/(app)/admin/layout.tsx` calls `requireAdmin()` so the whole subtree is admin-only. But UI reachability is never the gate: every admin server action (`setQuestionEnabled`, `setPassageEnabled`, `setDailyAttemptLimit` in [`app/lib/admin/actions.ts`](app/lib/admin/actions.ts)) calls `requireAdmin()` again before it writes. `requireAdmin()` ([`app/lib/admin/guard.ts`](app/lib/admin/guard.ts)) returns **404, not 403**, for non-admins (`notFound()`) — the `/admin` area does not advertise its own existence. Keep both checks; do not drop the in-action one on the assumption the layout already gated the page.
+
+- **Admin writes use the service-role client behind a role-gated `'use server'` action.** `act.questions`, `act.passages`, and `act.app_config` are RLS write-locked — the anon/authenticated role cannot mutate them. Each admin action runs `requireAdmin()` and then writes through `createAdminClient()` (service-role, bypasses RLS). The role check is what authorizes the write — the service-role client itself authorizes nothing. Never expose a write path that skips `requireAdmin()`.
+
+- **Admin reads of disabled rows must use the service-role client.** `act.questions` and `act.passages` have RLS policies `using (enabled)` — even admins cannot read disabled rows over the user-session client (the policy doesn't look at `act.profiles.role`; Supabase JWT claims only carry the API role `anon`/`authenticated`, not the app role). So `listQuestions`, `getQuestion`, `listPassages`, `getPassage` in [`app/lib/admin/queries.ts`](app/lib/admin/queries.ts) all use `createAdminClient()`. The `/admin` layout's `requireAdmin()` is the access gate; the service-role client is what makes disabled rows visible to admins (so they can re-enable).
+
+- **Admin RPC reads have a second role-check inside the SQL.** `act.admin_users_summary()` and `act.admin_user_analytics(p_user_id)` are `security definer` with `if (select role from act.profiles where id = auth.uid()) is distinct from 'admin' then raise exception 'not authorized'`. So even if a non-admin reaches the RPC directly (bypassing `/admin`), they get nothing. New admin read paths should follow this defense-in-depth pattern (RPC role check + layout `requireAdmin()`).
+
+- **Disabling a passage cascade-hides its child questions from new draws.** `act.draw_test` only picks `passages.enabled = true` rows for English/Reading/Science, and then joins the chosen passages to questions through their `passage_id`. So a disabled passage is never picked, and its children are never served. This is the moderation pattern: one disable hides a whole passage worth of bad output. Confirm before "fixing" `draw_test` — the cascade is intentional.
+
+- **`act.draw_test` enforces the daily attempt limit BEFORE the pool-thinness check.** Added in `supabase/migrations/20260526050000_act_admin_rpcs.sql`. A user at the cap gets `daily attempt limit reached (N / M)` rather than the cold-start `pool too thin` message. Today's attempts = `started_at >= date_trunc('day', now() at time zone 'utc')` in `('in_progress', 'submitted')`. Abandoned attempts don't burn an attempt slot.
+
+- **`act.app_config` is a single-row settings table.** Primary key is `check (id = 1)`; the only row is seeded by the migration. RLS-select for authenticated (the daily limit isn't secret — the public-side gate `getDailyLimit()` in [`app/lib/config.ts`](app/lib/config.ts) reads it directly). No write policy: `setDailyAttemptLimit` writes via service-role behind `requireAdmin()`. If you add a new setting, extend the table — don't create a sibling.
+
+- **Promotion is a service-role SQL `update`, not a UI.** There is no admin-promotion UI (per the SAT precedent and the `protect_profile_role` trigger). To promote: `update act.profiles set role = 'admin' where email = '<email>'` via Supabase MCP `execute_sql` (service-role). The user must already have a profile row — sign in once via the live deploy first so `getOrCreateProfile()` lazily creates it.
+
+- **`AppHeader` shows the `/admin` link only for `role === 'admin'`.** [`app/components/AppHeader.tsx`](app/components/AppHeader.tsx) reads `getOrCreateProfile()` (cached) and conditionally renders the Admin link between Analytics and How-it-works. Non-admins never see the link. The link is convenience — `/admin` is also the URL anyone could try; the layout's `requireAdmin()` 404s those.
+
+- **`app/lib/admin/flags.ts` is a placeholder for sub-project #7 (Feedback).** Empty `export {}` stub; the Feedback sub-project fills in `listFlags()`, `countOpenFlags()`, `resolveFlag()` against `act.question_flags`. The `<AdminNav/>` does not yet have an "Open Flags" tab — that's added in #7 too.
 
 ## Foundation followups (deferred to sub-project #2 or earlier)
 
