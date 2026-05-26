@@ -54,6 +54,35 @@ export async function setPassageEnabled(formData: FormData): Promise<void> {
   revalidatePath(`/admin/passages/${id}`);
 }
 
+// Marks a question flag resolved or dismissed. Admin-only.
+// act.question_flags has RLS enabled with NO POLICIES, so the update runs
+// through the service-role client. requireAdmin() is the authorization gate.
+// Both `resolved` and `dismissed` are terminal states; `resolved_at` is
+// stamped so the timeline is visible in the admin UI.
+export async function resolveFlag(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = formData.get('id')?.toString();
+  const status = formData.get('status')?.toString();
+  if (!id) {
+    throw new Error('resolveFlag: missing id');
+  }
+  if (status !== 'resolved' && status !== 'dismissed') {
+    throw new Error(`resolveFlag: invalid status: ${status}`);
+  }
+  const admin = createAdminClient();
+  const { error } = await admin
+    .schema('act')
+    .from('question_flags')
+    .update({ status, resolved_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) {
+    console.error('[resolveFlag] failed:', error);
+    throw new Error('Failed to update the flag.');
+  }
+  revalidatePath('/admin');
+  revalidatePath('/admin/flags');
+}
+
 // Update the app-wide daily test-attempt limit (act.app_config). Admin-only;
 // writes via the service-role client (app_config has no write policy).
 // act.draw_test re-reads the limit on every call.

@@ -1,16 +1,17 @@
 import Link from 'next/link';
 import { getPoolCounts } from '@/app/lib/admin/queries';
 import { listUsersWithStats } from '@/app/lib/admin/users';
+import { countOpenFlags } from '@/app/lib/admin/flags';
 import { getDailyLimit } from '@/app/lib/config';
 
-// /admin — Overview dashboard. Four stat cards summarising the pool,
-// user count, open flags (placeholder until sub-project #7), and the
-// daily attempt limit. The layout already requires admin via
-// requireAdmin(); no need to re-check here.
+// /admin — Overview dashboard. Stat cards summarising the pool, user
+// count, open flags (sub-project #7), and the daily attempt limit. The
+// layout already requires admin via requireAdmin(); no need to re-check.
 export default async function AdminOverviewPage() {
-  const [pool, users, dailyLimit] = await Promise.all([
+  const [pool, users, openFlagCount, dailyLimit] = await Promise.all([
     getPoolCounts(),
     listUsersWithStats(),
+    countOpenFlags(),
     getDailyLimit(),
   ]);
 
@@ -21,7 +22,7 @@ export default async function AdminOverviewPage() {
         Pool moderation, user activity, generation activity, and app settings.
       </p>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatCard
           href="/admin/questions"
           title="Question Pool"
@@ -51,12 +52,21 @@ export default async function AdminOverviewPage() {
           ]}
         />
         <StatCard
+          href="/admin/flags?status=open"
+          title="Open Flags"
+          headline={`${openFlagCount} open`}
+          lines={[
+            `User-reported question problems.`,
+            `Mark resolved or dismiss from /admin/flags.`,
+          ]}
+        />
+        <StatCard
           href="/admin/settings"
           title="Settings"
           headline={`${dailyLimit}/day`}
           lines={[
             `Daily test-attempt limit.`,
-            `Open Flags coming in #7.`,
+            `Adjust on /admin/settings.`,
           ]}
         />
       </div>
