@@ -1,0 +1,78 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { requireAdmin } from './guard';
+import { createAdminClient } from '@/app/lib/supabase/admin';
+
+// Enable or disable a pool question. Admin-only. act.questions is RLS
+// write-locked, so the write goes through the service-role client; a disabled
+// question is excluded by act.draw_test and never served again.
+export async function setQuestionEnabled(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = formData.get('id')?.toString();
+  const enabled = formData.get('enabled') === 'true';
+  if (!id) {
+    throw new Error('setQuestionEnabled: missing id');
+  }
+  const admin = createAdminClient();
+  const { error } = await admin
+    .schema('act')
+    .from('questions')
+    .update({ enabled })
+    .eq('id', id);
+  if (error) {
+    console.error('[setQuestionEnabled] failed:', error);
+    throw new Error('Failed to update the question.');
+  }
+  revalidatePath('/admin');
+  revalidatePath('/admin/questions');
+  revalidatePath(`/admin/questions/${id}`);
+}
+
+// Enable or disable a passage. Disabling cascade-hides its children questions
+// from new draws: act.draw_test only picks enabled passages, and the
+// question-build step joins through the picked set. Behind requireAdmin().
+export async function setPassageEnabled(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = formData.get('id')?.toString();
+  const enabled = formData.get('enabled') === 'true';
+  if (!id) {
+    throw new Error('setPassageEnabled: missing id');
+  }
+  const admin = createAdminClient();
+  const { error } = await admin
+    .schema('act')
+    .from('passages')
+    .update({ enabled })
+    .eq('id', id);
+  if (error) {
+    console.error('[setPassageEnabled] failed:', error);
+    throw new Error('Failed to update the passage.');
+  }
+  revalidatePath('/admin');
+  revalidatePath('/admin/passages');
+  revalidatePath(`/admin/passages/${id}`);
+}
+
+// Update the app-wide daily test-attempt limit (act.app_config). Admin-only;
+// writes via the service-role client (app_config has no write policy).
+// act.draw_test re-reads the limit on every call.
+export async function setDailyAttemptLimit(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const limit = Number(formData.get('limit'));
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error('Daily limit must be a whole number between 1 and 100.');
+  }
+  const admin = createAdminClient();
+  const { error } = await admin
+    .schema('act')
+    .from('app_config')
+    .update({ daily_attempt_limit: limit, updated_at: new Date().toISOString() })
+    .eq('id', 1);
+  if (error) {
+    console.error('[setDailyAttemptLimit] failed:', error);
+    throw new Error('Failed to update the daily limit.');
+  }
+  revalidatePath('/admin');
+  revalidatePath('/admin/settings');
+}
