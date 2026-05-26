@@ -16,6 +16,12 @@ export async function AppHeader() {
           ACT Practice
         </Link>
         <Link
+          href="/analytics"
+          className="text-sm text-slate-500 transition-colors hover:text-slate-900"
+        >
+          Analytics
+        </Link>
+        <Link
           href="/how-it-works"
           className="text-sm text-slate-500 transition-colors hover:text-slate-900"
         >
