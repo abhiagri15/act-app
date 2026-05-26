@@ -15,9 +15,9 @@ pnpm dlx tsx scripts/check-format.ts
 
 ## Architecture
 
-Foundation + Auth + AI + Persistence shipped as of `post-persistence`. See [`docs/superpowers/specs/2026-05-26-act-app-overview-design.md`](docs/superpowers/specs/2026-05-26-act-app-overview-design.md) for the overall architecture and the 7 sub-project plan; auth specifics in [`docs/superpowers/specs/2026-05-26-act-app-auth-design.md`](docs/superpowers/specs/2026-05-26-act-app-auth-design.md); persistence specifics in [`docs/superpowers/specs/2026-05-26-act-app-persistence-design.md`](docs/superpowers/specs/2026-05-26-act-app-persistence-design.md).
+Foundation + Auth + AI + Persistence + Analytics shipped as of `post-analytics`. See [`docs/superpowers/specs/2026-05-26-act-app-overview-design.md`](docs/superpowers/specs/2026-05-26-act-app-overview-design.md) for the overall architecture and the 7 sub-project plan; auth specifics in [`docs/superpowers/specs/2026-05-26-act-app-auth-design.md`](docs/superpowers/specs/2026-05-26-act-app-auth-design.md); persistence specifics in [`docs/superpowers/specs/2026-05-26-act-app-persistence-design.md`](docs/superpowers/specs/2026-05-26-act-app-persistence-design.md); analytics specifics in [`docs/superpowers/specs/2026-05-26-act-app-analytics-design.md`](docs/superpowers/specs/2026-05-26-act-app-analytics-design.md).
 
-Tag chain: `post-foundation` → `post-auth` → `post-persistence` → (Analytics) → (Admin) → (Feedback). *(AI sub-project is between Auth and Persistence in scope but no separate tag; the AI commits sit on `main` before persistence.)*
+Tag chain: `post-foundation` → `post-auth` → `post-persistence` → `post-analytics` → (Admin) → (Feedback). *(AI sub-project is between Auth and Persistence in scope but no separate tag; the AI commits sit on `main` before persistence.)*
 
 - Production deploy: https://act-app-ten.vercel.app
 - GitHub repo: https://github.com/abhiagri15/act-app
@@ -31,6 +31,7 @@ Tag chain: `post-foundation` → `post-auth` → `post-persistence` → (Analyti
   - `(app)/test/new/` — pre-test screen with the Science toggle + confirm modal. Calls `supabase.rpc('draw_test')` from the browser client, then routes to `/test/[id]/english`.
   - `(app)/test/[attemptId]/` — runner sub-tree. `layout.tsx` guards "attempt must be live" (404 / redirect on submitted/abandoned). Each section page (`english`, `math`, `break`, `reading`, `science`, `results`) calls `guardSectionRoute()` from `route-guards.ts` to enforce URL-segment-matches-current-section + force-lock-on-deadline.
   - `(app)/dashboard/attempts/[id]/` — submitted-attempt review. Lists every question grouped by section + passage, with the user's selection marked + correct answer + explanation.
+  - `(app)/analytics/` — analytics page. Server component, calls `getAnalytics()` (which wraps the security-invoker `act.user_analytics()` RPC) and renders summary stats, composite trend, per-section trend, per-section accuracy, focus areas, and a per-skill breakdown. Empty state when `tests_taken === 0`. All visuals are dependency-free SVG/CSS (mirrors the SAT app).
 - **`app/auth/callback/route.ts`** — OAuth + email-link `code` exchange, then redirects into the app. Same-origin redirect guard on the `next` param.
 - **`app/how-it-works/`** — public marketing page, outside both groups.
 
@@ -82,6 +83,22 @@ Tag chain: `post-foundation` → `post-auth` → `post-persistence` → (Analyti
 - **Two-pane split ratio persists in localStorage keyed `act-split-{section}`.** Reading/Science use `TwoPaneRunner`, English uses `EnglishRunner` (with inline markers). Both share the same split-ratio shape: a number 30–70 representing left-pane percent. Below 768px viewport, both collapse to stacked layout (sticky toggle on Reading/Science, max-40%-passage-on-top for English). Keep the storage key per-section so a user can have different preferred ratios per layout.
 
 - **`StimulusRenderer` is dependency-free.** It renders `passages.stimuli` jsonb arrays of `{kind: 'table' | 'figure', caption, data}` using HTML tables and inline SVG (with linear-interp scaling, axes, point markers, multi-series legend). A try/catch wraps each item so one malformed stimulus dumps as raw JSON in a red box while the other stimuli on the same passage still render. Do NOT add a charting library — the SVG is intentional (small bundle, no client-only deps).
+
+## Analytics sub-project (sub-project #5) gotchas
+
+- **`act.user_analytics()` is `security invoker` — deliberately unlike the persistence write RPCs.** It is a read-only aggregation, so it runs as the *caller*: RLS on `act.test_attempts` + `act.attempt_responses` (both select-only, scoped to `auth.uid()`) confines its results to the signed-in user. No `auth.uid()` filter is *required* for correctness — but the function keeps explicit `where user_id = auth.uid()` clauses anyway as a clarity backstop (do not "clean them up"; they document intent). This is the opposite of the security-DEFINER write RPCs (`draw_test`, `submit_section`, etc.), which must bypass RLS to write and therefore set `user_id := auth.uid()` themselves. Keep this distinction: a function that only reads RLS-protected tables should stay `security invoker`; do not make `user_analytics` a definer.
+
+- **The analytics view shape from the RPC is the contract.** `AnalyticsView` in `app/lib/analytics/compute.ts` mirrors the jsonb the RPC builds exactly:
+  - `sections` is an **object** keyed by section name (e.g. `{ english: { correct, total }, math: ... }`) — NOT an array (unlike the SAT app's shape).
+  - `trend[].scaled_scores` is partial: when `include_science === false`, the `science` key may be absent. `SectionTrend` must produce a **gap** in the Science polyline for those attempts (split into segments), not interpolate across them.
+  - `latest_composite` / `avg_composite` / `best_composite` are nullable; the summary helper returns `null` (not `0`) so the UI can render "—".
+  If you change the RPC's output keys, change `AnalyticsView` and re-run `scripts/check-analytics.ts` in the same change.
+
+- **Analytics compute helpers are checked by a script, not a test runner.** The pure helpers in `app/lib/analytics/compute.ts` are exercised by `scripts/check-analytics.ts` (`pnpm dlx tsx scripts/check-analytics.ts`, 16 assertions). If you change accuracy / sorting / summary logic, update that script too.
+
+- **`focusAreas` requires ≥ 5 attempts per skill.** A user who missed 1/1 on some skill shouldn't see it ranked as their #1 weakness — the 5-attempt floor smooths that out. `FocusAreas` renders nothing when no skill clears the bar, which keeps the section header from appearing on the very first attempt. If you tune the threshold, also update the assertion in `scripts/check-analytics.ts`.
+
+- **Visual components are plain (non-client) components.** `ScoreTrend`, `SectionTrend`, `SectionAccuracy`, `SkillAccuracy`, `FocusAreas`, `SummaryStats` all render props -> SVG/CSS only. No hooks, no `'use client'`, no charting library. `/analytics` is a server component; keep these dependency-free and server-renderable.
 
 ## Foundation followups (deferred to sub-project #2 or earlier)
 
