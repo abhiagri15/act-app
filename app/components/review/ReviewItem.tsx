@@ -1,3 +1,4 @@
+import { FlagQuestion } from '@/app/components/FlagQuestion';
 import type { AttemptQuestion, AttemptResponse } from '@/app/lib/persistence/schema';
 
 interface Props {
@@ -8,9 +9,10 @@ interface Props {
 
 const CHOICE_LETTERS = ['A', 'B', 'C', 'D'] as const;
 
-// Server component (v1 — no client interactivity).
-// Renders one question with the user's selection marked + the correct
-// answer + the explanation. The flag-bad-question UI is sub-project #7.
+// Server component. Renders one question with the user's selection marked +
+// the correct answer + the explanation. Hosts the <FlagQuestion/> client
+// widget at the bottom — this is the single inclusion point shared by the
+// post-test results review AND /dashboard/attempts/[id].
 export function ReviewItem({ question, response, index }: Props) {
   const choices = Array.isArray(question.choices) ? question.choices : [];
   const userPicked = response?.selected ?? null;
@@ -86,6 +88,8 @@ export function ReviewItem({ question, response, index }: Props) {
           <div className="whitespace-pre-wrap">{question.explanation}</div>
         </div>
       )}
+
+      <FlagQuestion questionId={question.question_id} />
     </div>
   );
 }
