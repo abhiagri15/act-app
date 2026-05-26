@@ -50,6 +50,8 @@ Tag chain: `post-foundation` → (Auth) → (AI) → (Persistence) → (Analytic
 
 - **Trigger functions have mutable `search_path`** (tech debt, INFO advisory). The three trigger functions `act.set_updated_at`, `act.passages_fill_defaults`, `act.questions_fill_defaults` do not set `search_path = act, public, pg_temp`. SAT app has the same advisory. Fix in sub-project #2's first migration when SECURITY DEFINER RPCs are added.
 
+- **`act.protect_profile_role` is gratuitously `SECURITY DEFINER`** (tech debt, WARN advisory). The function is only invoked from a BEFORE INSERT/UPDATE trigger, where the security context doesn't matter. SAT's equivalent is `SECURITY INVOKER`. Fix alongside the search_path cleanup in sub-project #2's first migration: `alter function act.protect_profile_role() security invoker; revoke execute on function act.protect_profile_role() from public;`
+
 ## Foundation followups (deferred to sub-project #2 or earlier)
 
 - **Preview env vars not set on Vercel.** Vercel CLI 54.4.1 rejected `vercel env add ... preview --yes` due to a `git_branch_required` prompt that wouldn't dismiss. Production + Development env vars are set; Preview needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET` set via the dashboard or `--value` CLI form.
