@@ -17,7 +17,7 @@ pnpm dlx tsx scripts/check-format.ts
 
 Foundation + Auth + AI + Persistence + Analytics + Admin + Feedback shipped as of `post-feedback` — the app is feature-complete. See [`docs/superpowers/specs/2026-05-26-act-app-overview-design.md`](docs/superpowers/specs/2026-05-26-act-app-overview-design.md) for the overall architecture and the 7 sub-project plan; auth specifics in [`docs/superpowers/specs/2026-05-26-act-app-auth-design.md`](docs/superpowers/specs/2026-05-26-act-app-auth-design.md); persistence specifics in [`docs/superpowers/specs/2026-05-26-act-app-persistence-design.md`](docs/superpowers/specs/2026-05-26-act-app-persistence-design.md); analytics specifics in [`docs/superpowers/specs/2026-05-26-act-app-analytics-design.md`](docs/superpowers/specs/2026-05-26-act-app-analytics-design.md); admin specifics in [`docs/superpowers/specs/2026-05-26-act-app-admin-design.md`](docs/superpowers/specs/2026-05-26-act-app-admin-design.md); feedback specifics in [`docs/superpowers/specs/2026-05-26-act-app-feedback-design.md`](docs/superpowers/specs/2026-05-26-act-app-feedback-design.md).
 
-Tag chain: `post-foundation` → `post-auth` → `post-persistence` → `post-analytics` → `post-admin` → `post-feedback`. *(AI sub-project is between Auth and Persistence in scope but no separate tag; the AI commits sit on `main` before persistence.)*
+Tag chain: `post-foundation` → `post-auth` → `post-ai` → `post-persistence` → `post-analytics` → `post-admin` → `post-feedback`. All 7 tags exist on origin.
 
 - Production deploy: https://act-app-ten.vercel.app
 - GitHub repo: https://github.com/abhiagri15/act-app
@@ -64,6 +64,8 @@ Tag chain: `post-foundation` → `post-auth` → `post-persistence` → `post-an
 - **Vercel Next.js security gate.** `next` is pinned to `15.5.18` (CVE-patched). Do not downgrade; Vercel will hard-fail the deploy on any earlier 15.x with a known CVE.
 
 - **`suppressHydrationWarning` is on `<body>` only** in `app/layout.tsx` — defense against browser extension DOM injection. Do not extend it to other elements (would hide real hydration mismatches).
+
+- **Supabase advisor flags all `act.*` SECURITY DEFINER RPCs** with `authenticated_security_definer_function_executable` WARN. These warnings are BY DESIGN: each function validates `auth.uid()` (or `act.profiles.role='admin'`) inside its body, and a SECURITY INVOKER alternative could not bypass RLS to write. Do not "fix" them by downgrading to SECURITY INVOKER — that would break the write path. The 2 `rls_enabled_no_policy` INFO lints on `act.generation_runs` and `act.question_flags` are similarly intentional (deny-all for authenticated; service-role / RPC is the only access path). Net: project advisor noise is expected to stay at 9 WARN + 2 INFO for `act.*` until the SDK adds a "definer-with-internal-check" annotation.
 
 ## Persistence sub-project (sub-project #4) gotchas
 

@@ -136,6 +136,7 @@ export async function runGeneration(opts?: {
   const maxBatches = opts?.maxBatches ?? 6;
   const supabase = createAdminClient();
   const provider = getProvider();
+  const runStartedAt = new Date().toISOString();
 
   const buffers = await readBufferCounts(supabase);
   const plan = planBatches(buffers, maxBatches);
@@ -183,6 +184,7 @@ export async function runGeneration(opts?: {
             ? head.skill
             : null;
       await supabase.schema('act').from('generation_runs').insert({
+        started_at: runStartedAt,
         finished_at: new Date().toISOString(),
         skill,
         target,
