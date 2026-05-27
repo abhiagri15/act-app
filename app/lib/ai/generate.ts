@@ -37,6 +37,17 @@ const MATH_TARGETS_BY_DIFFICULTY: Record<Difficulty, number> = {
 };
 const MATH_BATCH_SIZE = 3;
 
+// Per-cell floors. The fill-ratio planner can leave individual cells empty
+// when every cell happens to be "above target ratio" relative to its neighbours.
+// These floors are the airtight backstop: a (math_skill, difficulty) cell
+// below SKILL_FLOOR or a passage_type below PASSAGE_FLOOR is FORCED to the
+// top of the plan with fillRatio=0, regardless of where the other cells sit.
+//
+// Once every cell is at the floor, the normal fillRatio picker kicks back in.
+// Tune in code (no admin UI for v1); see CLAUDE.md for the rationale.
+const SKILL_FLOOR = 3;
+const PASSAGE_FLOOR = 1;
+
 const DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'] as const;
 
 function randomDifficulty(): Difficulty {
@@ -148,32 +159,45 @@ function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
 
   // Passages: one candidate per passage_type. Difficulty picked uniformly
   // random per batch; there's no per-difficulty quota on passage buckets.
+  //
+  // Floor gate: a passage_type below PASSAGE_FLOOR is forced to fillRatio=0
+  // (top of plan) even when its raw fillRatio is comparable to other types'.
+  // Without this, a 3:1 ratio gap between targets (e.g. english_essay=20 vs
+  // conflicting_viewpoints=8) lets the higher-target type look "thinner"
+  // forever and the small-target types can stay at zero.
   for (const [pt, target] of Object.entries(PASSAGE_TARGETS) as Array<
     [PassageType, number]
   >) {
     const have = buffers.passages[pt] ?? 0;
     if (have < target) {
+      const belowFloor = have < PASSAGE_FLOOR;
       batches.push({
         kind: 'passage',
         passage_type: pt,
         difficulty: randomDifficulty(),
-        fillRatio: have / target,
+        fillRatio: belowFloor ? 0 : have / target,
       });
     }
   }
 
   // Math: one candidate per (skill, difficulty) cell — 3 cells per skill × 3
   // skills = 9 cells. Pick the thinnest cells across the whole math grid.
+  //
+  // Floor gate: any (skill, difficulty) cell with fewer than SKILL_FLOOR
+  // enabled questions is forced to fillRatio=0. Same rationale as above —
+  // even if every cell is "above ratio target", individual cells could be
+  // empty when targets differ across difficulties (easy 20 vs hard 15 etc.).
   for (const skill of SKILLS.math) {
     for (const difficulty of DIFFICULTIES) {
       const target = MATH_TARGETS_BY_DIFFICULTY[difficulty];
       const have = buffers.math[skill]?.[difficulty] ?? 0;
       if (have < target) {
+        const belowFloor = have < SKILL_FLOOR;
         batches.push({
           kind: 'math_standalone',
           skill,
           difficulty,
-          fillRatio: have / target,
+          fillRatio: belowFloor ? 0 : have / target,
         });
       }
     }
