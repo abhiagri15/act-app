@@ -40,6 +40,14 @@ interface BufferCounts {
 interface RunError {
   bucket: string;
   message: string;
+  // Multi-validity gate fields. Set when kind='multi_valid' — a candidate
+  // passed the single-answer self-verify but findValidChoices judged more
+  // than one choice to be a valid correct answer (or the array didn't
+  // include the candidate's claimed answer_key).
+  kind?: 'multi_valid';
+  question_index?: number;
+  valid_indices?: number[];
+  answer_key?: 'A' | 'B' | 'C' | 'D';
 }
 
 interface RunResult {
@@ -148,11 +156,24 @@ export async function runGeneration(opts?: {
   const errors: RunError[] = [];
 
   for (const batch of plan) {
+    const bucket = bucketLabel(batch);
     try {
       if (batch.kind === 'passage') {
-        produced += await processPassageBatch(supabase, provider, batch.passage_type);
+        produced += await processPassageBatch(
+          supabase,
+          provider,
+          batch.passage_type,
+          bucket,
+          errors,
+        );
       } else {
-        produced += await processMathBatch(supabase, provider, batch.skill);
+        produced += await processMathBatch(
+          supabase,
+          provider,
+          batch.skill,
+          bucket,
+          errors,
+        );
       }
     } catch (e) {
       const message =
@@ -161,8 +182,8 @@ export async function runGeneration(opts?: {
           : typeof e === 'object' && e !== null
             ? JSON.stringify(e)
             : String(e);
-      console.error('[generate] batch error', bucketLabel(batch), message, e);
-      errors.push({ bucket: bucketLabel(batch), message });
+      console.error('[generate] batch error', bucket, message, e);
+      errors.push({ bucket, message });
     }
   }
 
@@ -199,10 +220,16 @@ export async function runGeneration(opts?: {
   return { generated: produced, batches: plan.length, errors };
 }
 
+function answerKeyToIndex(key: 'A' | 'B' | 'C' | 'D'): number {
+  return key.charCodeAt(0) - 'A'.charCodeAt(0);
+}
+
 async function processPassageBatch(
   supabase: ReturnType<typeof createAdminClient>,
   provider: ReturnType<typeof getProvider>,
   passageType: PassageType,
+  bucket: string,
+  errors: RunError[],
 ): Promise<number> {
   // a. Generate passage.
   const candidate = await provider.generatePassage(passageType);
@@ -250,8 +277,12 @@ async function processPassageBatch(
   });
 
   // d. Validate + self-verify each question; drop ones the model can't re-solve.
+  //    Then run the multi-validity gate (findValidChoices) on the survivors;
+  //    drop any candidate whose choice list has > 1 valid answer (or whose
+  //    intended answer_key isn't among the valid indices).
   const verified: QuestionCandidate[] = [];
-  for (const q of rawQuestions) {
+  for (let qi = 0; qi < rawQuestions.length; qi++) {
+    const q = rawQuestions[qi];
     const parsedQ = questionCandidateSchema.safeParse(q);
     if (!parsedQ.success) continue;
     const candidateQ = parsedQ.data;
@@ -282,7 +313,36 @@ async function processPassageBatch(
       console.error('[generate] solve error', e);
       continue;
     }
-    if (reAnswer === candidateQ.answer_key) verified.push(candidateQ);
+    if (reAnswer !== candidateQ.answer_key) continue;
+
+    // Multi-validity gate. Mirrors SAT's findValidChoices pattern.
+    let validIndices: number[];
+    try {
+      validIndices = await provider.findValidChoices({
+        stem: candidateQ.stem,
+        choices: candidateQ.choices,
+        passageBody: passage.body,
+        passageStimuli: passage.stimuli,
+      });
+    } catch (e) {
+      console.error('[generate] findValidChoices error', e);
+      continue;
+    }
+    const intendedIndex = answerKeyToIndex(candidateQ.answer_key);
+    const okSingle =
+      validIndices.length === 1 && validIndices[0] === intendedIndex;
+    if (!okSingle) {
+      errors.push({
+        bucket,
+        message: `multi_valid: indices=[${validIndices.join(',')}] answer_key=${candidateQ.answer_key}`,
+        kind: 'multi_valid',
+        question_index: qi,
+        valid_indices: validIndices,
+        answer_key: candidateQ.answer_key,
+      });
+      continue;
+    }
+    verified.push(candidateQ);
   }
 
   // e. Insert verified questions.
@@ -317,10 +377,13 @@ async function processMathBatch(
   supabase: ReturnType<typeof createAdminClient>,
   provider: ReturnType<typeof getProvider>,
   skill: string,
+  bucket: string,
+  errors: RunError[],
 ): Promise<number> {
   const rawQuestions = await provider.generateMathStandalone(skill, MATH_BATCH_SIZE);
   let inserts = 0;
-  for (const q of rawQuestions) {
+  for (let qi = 0; qi < rawQuestions.length; qi++) {
+    const q = rawQuestions[qi];
     const parsedQ = questionCandidateSchema.safeParse(q);
     if (!parsedQ.success) continue;
     const candidateQ = parsedQ.data;
@@ -340,6 +403,34 @@ async function processMathBatch(
       continue;
     }
     if (reAnswer !== candidateQ.answer_key) continue;
+
+    // Multi-validity gate. Reject Math candidates where >1 choice is judged
+    // valid (e.g. a quadratic with both roots in the choice list) or where
+    // the claimed answer_key isn't among the valid indices.
+    let validIndices: number[];
+    try {
+      validIndices = await provider.findValidChoices({
+        stem: candidateQ.stem,
+        choices: candidateQ.choices,
+      });
+    } catch (e) {
+      console.error('[generate] findValidChoices error', e);
+      continue;
+    }
+    const intendedIndex = answerKeyToIndex(candidateQ.answer_key);
+    const okSingle =
+      validIndices.length === 1 && validIndices[0] === intendedIndex;
+    if (!okSingle) {
+      errors.push({
+        bucket,
+        message: `multi_valid: indices=[${validIndices.join(',')}] answer_key=${candidateQ.answer_key}`,
+        kind: 'multi_valid',
+        question_index: qi,
+        valid_indices: validIndices,
+        answer_key: candidateQ.answer_key,
+      });
+      continue;
+    }
 
     const { error } = await supabase
       .schema('act')

@@ -36,6 +36,18 @@ export interface AIProvider {
     passageBody?: string;
     passageStimuli?: Stimulus[];
   }): Promise<'A' | 'B' | 'C' | 'D'>;
+
+  // Multi-validity check for MCQ. Asks the model to evaluate EACH choice
+  // independently and return the indices (0..3) of EVERY choice it considers
+  // a valid correct answer. Used to reject candidates where more than 1 choice
+  // is actually correct (e.g., a quadratic with both roots in the list).
+  // Returns sorted array of 0-based indices (typically [intendedIndex]).
+  findValidChoices(input: {
+    stem: string;
+    choices: Array<{ key: 'A' | 'B' | 'C' | 'D'; text: string }>;
+    passageBody?: string;
+    passageStimuli?: Stimulus[];
+  }): Promise<number[]>;
 }
 
 // Provider factory — keyed on ACT_AI_PROVIDER so other providers can be added later.

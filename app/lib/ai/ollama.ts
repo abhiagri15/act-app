@@ -158,6 +158,68 @@ export class OllamaCloudProvider implements AIProvider {
     }
     return m[0] as 'A' | 'B' | 'C' | 'D';
   }
+
+  // Multi-validity check (MCQ): asks the model to evaluate EACH of the 4
+  // choices independently and report the 0-based indices of every choice it
+  // considers a valid correct answer. Mirrors SAT's findValidChoices, adapted
+  // for ACT's A/B/C/D keyed choices. Used by generate.ts after the
+  // single-answer self-verify passes; a candidate with more than one valid
+  // index is rejected.
+  async findValidChoices(input: {
+    stem: string;
+    choices: Array<{ key: 'A' | 'B' | 'C' | 'D'; text: string }>;
+    passageBody?: string;
+    passageStimuli?: Stimulus[];
+  }): Promise<number[]> {
+    const stimuliBlock = input.passageStimuli && input.passageStimuli.length
+      ? `Stimuli (JSON):\n${JSON.stringify(input.passageStimuli)}\n`
+      : '';
+    const passageBlock = input.passageBody
+      ? `Passage:\n"""\n${input.passageBody}\n"""\n`
+      : '';
+    const content = await chat(
+      `For the ACT question below, evaluate EACH of the 4 choices ` +
+        `independently and decide whether it is a valid correct answer. ` +
+        `A valid answer satisfies the question completely; do NOT include ` +
+        `choices that are merely plausible distractors. For math equations ` +
+        `with multiple roots (e.g. quadratics where both roots appear), ` +
+        `every actual root that appears in the list counts as valid.\n\n` +
+        `Respond with ONLY a JSON array of 0-based indices, e.g. [0] for one ` +
+        `valid choice, or [0,2] if two are valid. The indices map A=0, B=1, ` +
+        `C=2, D=3. No prose, no markdown, no other text.\n\n` +
+        passageBlock +
+        stimuliBlock +
+        `Question: ${input.stem}\n` +
+        input.choices.map((c, i) => `${i}: ${c.key}: ${c.text}`).join('\n'),
+    );
+    // Tolerant extraction: look for the first JSON-array-of-ints in the
+    // response. Falls back to scraping individual 0-3 digits if the model
+    // returned an unfenced list like "0, 2".
+    const raw = content.trim();
+    let arr: number[] | null = null;
+    const fenced = raw.match(/\[\s*(?:[0-3]\s*,\s*)*[0-3]?\s*\]/);
+    if (fenced) {
+      try {
+        const parsed = JSON.parse(fenced[0]);
+        if (Array.isArray(parsed)) {
+          arr = parsed.filter(
+            (n) => Number.isInteger(n) && n >= 0 && n <= 3,
+          );
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    if (arr === null) {
+      const found = new Set<number>();
+      for (const m2 of raw.matchAll(/\b[0-3]\b/g)) {
+        found.add(Number.parseInt(m2[0], 10));
+      }
+      arr = [...found];
+    }
+    arr.sort((a, b) => a - b);
+    return arr;
+  }
 }
 
 const passagePromptBuilders: Record<PassageType, () => string> = {
