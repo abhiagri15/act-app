@@ -157,11 +157,19 @@ from any review surface; admins triage flags at `/admin/flags`.
 
 - **`resolveFlag(formData)` accepts a status of `resolved` or `dismissed`.** The action validates both ids via the form payload and stamps `resolved_at = now()` on both terminal states (the column name is historical; "dismissed" still gets a timestamp). The `FlagRow` component renders two separate forms (Mark Resolved + Dismiss) that POST to the same action with different hidden `status` inputs. Both are admin-only — `requireAdmin()` runs before the write.
 
-## Scoring v2
+## Scoring v2 (superseded by v3)
 
-- **`act.score_scales` is now seeded by a power-function curve, not linear interp.** Migration [`supabase/migrations/20260526070000_act_score_scales_v2.sql`](supabase/migrations/20260526070000_act_score_scales_v2.sql) truncates and reseeds with `scaled = round(1 + 35 * (raw/max_raw)^EXPONENT)` clamped `[1, 36]`. Per-section exponents: English/Reading `0.65`, Math/Science `0.70`. The curve is concave (exponent < 1) — more forgiving in the middle. Raw 50% scores now map to scaled ≈ 22-23 (was 18 with the linear v1). Endpoints unchanged (raw 0 → 1, raw max → 36); per-section row counts unchanged (51/46/37/41, total 175).
+- **`act.score_scales` was reseeded by a power-function curve in v2.** Migration [`supabase/migrations/20260526070000_act_score_scales_v2.sql`](supabase/migrations/20260526070000_act_score_scales_v2.sql) truncated and reseeded with `scaled = round(1 + 35 * (raw/max_raw)^EXPONENT)` clamped `[1, 36]`. Per-section exponents: English/Reading `0.65`, Math/Science `0.70`. Concave (exponent < 1) — more forgiving in the middle. Raw 50% mapped to scaled ≈ 22-23 (vs 18 with linear v1). Better than v1 but still synthetic — superseded by the published-scale v3 below.
 
-- **A future v3 could swap in an actual ACT-published scale table** via an identical-shape migration (truncate + reinsert per `(section, raw_score) → scaled_score`). No app code change required — the section/composite scoring path reads from `act.score_scales` only.
+## Scoring v3
+
+- **`act.score_scales` is now seeded by a rescaled published Classic ACT scale.** Migration [`supabase/migrations/20260526080000_act_score_scales_v3.sql`](supabase/migrations/20260526080000_act_score_scales_v3.sql) truncates and reseeds from the Classic ACT (English 75 / Math 60 / Reading 40 / Science 40) raw→scaled table in ACT's "Preparing for the ACT 2021-2022" booklet, a publicly distributed practice resource. Per-form variation on Classic ACT is ±1–2 points; the chosen form is representative.
+
+- **Rescaling formula: `classic_equivalent_raw = round(enhanced_raw * classic_max / enhanced_max)`.** Science (Enhanced 40 = Classic 40) requires no rescaling — uses Classic Science directly. English (50→75, factor 1.5), Math (45→60, factor 1.333…), and Reading (36→40, factor 1.111…) rescale. Endpoints unchanged (raw 0 → 1, raw max → 36); per-section row counts unchanged (51/46/37/41, total 175).
+
+- **Same shape as v1 / v2 — no app code change.** The section/composite scoring path reads from `act.score_scales` only. A future v4 (e.g. averaging multiple Classic forms, or swapping in an Enhanced-native table once ACT publishes one) would be another truncate+reseed migration with no code change.
+
+- **English raw=25 comparison across versions:** v1 linear → 19, v2 power → 23, v3 published → 15. The rescaled-real curve is noticeably steeper in the lower-mid range than the synthetic power curve, which is what real ACT tables look like.
 
 ## Calculator on Math
 
