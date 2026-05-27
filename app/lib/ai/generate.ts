@@ -40,13 +40,16 @@ const MATH_BATCH_SIZE = 3;
 // Per-cell floors. The fill-ratio planner can leave individual cells empty
 // when every cell happens to be "above target ratio" relative to its neighbours.
 // These floors are the airtight backstop: a (math_skill, difficulty) cell
-// below SKILL_FLOOR or a passage_type below PASSAGE_FLOOR is FORCED to the
-// top of the plan with fillRatio=0, regardless of where the other cells sit.
+// below the skill floor or a passage_type below the passage floor is FORCED
+// to the top of the plan with fillRatio=0, regardless of where the other
+// cells sit.
 //
 // Once every cell is at the floor, the normal fillRatio picker kicks back in.
-// Tune in code (no admin UI for v1); see CLAUDE.md for the rationale.
-const SKILL_FLOOR = 3;
-const PASSAGE_FLOOR = 1;
+// Values now live in act.app_config (min_skill_floor, min_passage_floor) and
+// are read at the start of runGeneration() — see CLAUDE.md for the rationale.
+// The constants here are the fallback defaults if app_config is unreachable.
+const DEFAULT_SKILL_FLOOR = 3;
+const DEFAULT_PASSAGE_FLOOR = 1;
 
 const DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'] as const;
 
@@ -154,13 +157,18 @@ async function readBufferCounts(
   return out;
 }
 
-function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
+function planBatches(
+  buffers: BufferCounts,
+  maxBatches: number,
+  skillFloor: number,
+  passageFloor: number,
+): Batch[] {
   const batches: Batch[] = [];
 
   // Passages: one candidate per passage_type. Difficulty picked uniformly
   // random per batch; there's no per-difficulty quota on passage buckets.
   //
-  // Floor gate: a passage_type below PASSAGE_FLOOR is forced to fillRatio=0
+  // Floor gate: a passage_type below `passageFloor` is forced to fillRatio=0
   // (top of plan) even when its raw fillRatio is comparable to other types'.
   // Without this, a 3:1 ratio gap between targets (e.g. english_essay=20 vs
   // conflicting_viewpoints=8) lets the higher-target type look "thinner"
@@ -170,7 +178,7 @@ function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
   >) {
     const have = buffers.passages[pt] ?? 0;
     if (have < target) {
-      const belowFloor = have < PASSAGE_FLOOR;
+      const belowFloor = have < passageFloor;
       batches.push({
         kind: 'passage',
         passage_type: pt,
@@ -183,7 +191,7 @@ function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
   // Math: one candidate per (skill, difficulty) cell — 3 cells per skill × 3
   // skills = 9 cells. Pick the thinnest cells across the whole math grid.
   //
-  // Floor gate: any (skill, difficulty) cell with fewer than SKILL_FLOOR
+  // Floor gate: any (skill, difficulty) cell with fewer than `skillFloor`
   // enabled questions is forced to fillRatio=0. Same rationale as above —
   // even if every cell is "above ratio target", individual cells could be
   // empty when targets differ across difficulties (easy 20 vs hard 15 etc.).
@@ -192,7 +200,7 @@ function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
       const target = MATH_TARGETS_BY_DIFFICULTY[difficulty];
       const have = buffers.math[skill]?.[difficulty] ?? 0;
       if (have < target) {
-        const belowFloor = have < SKILL_FLOOR;
+        const belowFloor = have < skillFloor;
         batches.push({
           kind: 'math_standalone',
           skill,
@@ -222,8 +230,23 @@ export async function runGeneration(opts?: {
   const provider = getProvider();
   const runStartedAt = new Date().toISOString();
 
+  // Read floor config at run start; fall back to defaults if app_config absent.
+  let skillFloor = DEFAULT_SKILL_FLOOR;
+  let passageFloor = DEFAULT_PASSAGE_FLOOR;
+  const { data: cfg } = await supabase
+    .schema('act')
+    .from('app_config')
+    .select('min_skill_floor, min_passage_floor')
+    .eq('id', 1)
+    .maybeSingle();
+  if (cfg) {
+    skillFloor = (cfg as { min_skill_floor: number | null }).min_skill_floor ?? skillFloor;
+    passageFloor =
+      (cfg as { min_passage_floor: number | null }).min_passage_floor ?? passageFloor;
+  }
+
   const buffers = await readBufferCounts(supabase);
-  const plan = planBatches(buffers, maxBatches);
+  const plan = planBatches(buffers, maxBatches, skillFloor, passageFloor);
   if (plan.length === 0) {
     return { generated: 0, batches: 0, reason: 'all buffers above target', errors: [] };
   }
