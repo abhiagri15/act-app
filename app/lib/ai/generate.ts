@@ -224,6 +224,52 @@ function answerKeyToIndex(key: 'A' | 'B' | 'C' | 'D'): number {
   return key.charCodeAt(0) - 'A'.charCodeAt(0);
 }
 
+// Belt-and-suspenders pass: the ACT prompt explicitly tells the model not to
+// refer to choices by letter ("Choice A is correct...") in explanations. Most
+// of the time it complies, but it occasionally slips. The app shuffles choice
+// keys at runtime, so a surviving "Choice A" reference becomes wrong the moment
+// the question is served. This regex rewrites any surviving "Choice X" /
+// "Option N" references to either "the correct choice" or "another choice"
+// based on whether the referenced index matches the candidate's intended
+// answer. Mirrors SAT's n8n Parse-Candidates pattern.
+//
+// Matches (case-insensitive): \b(Choice|Option)\s+([A-D]|[0-3])\b
+//   "Choice A" / "choice b" / "OPTION C" / "Option 2" / etc.
+// "Choice X" letter form: A=0, B=1, C=2, D=3.
+// "Option N" digit form: 0..3 already 0-based.
+// Runs multiple passes until stable (in case a replacement produces a residual
+// pattern, which it shouldn't, but the stability check is cheap insurance).
+export function repairLetterRefs(
+  explanation: string,
+  correctIndex: number,
+  _choices: Array<{ key: 'A' | 'B' | 'C' | 'D'; text: string }>,
+): string {
+  const pattern = /\b(Choice|Option)\s+([A-Da-d]|[0-3])\b/gi;
+  let current = explanation;
+  // Cap at 5 passes — replacements never grow the string in a way the regex
+  // could re-match, but the cap guarantees the loop terminates regardless.
+  for (let pass = 0; pass < 5; pass++) {
+    let mutated = false;
+    const next = current.replace(pattern, (_match, _kind, token) => {
+      mutated = true;
+      let refIndex: number;
+      const t = String(token);
+      if (/^[A-Da-d]$/.test(t)) {
+        refIndex = t.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
+      } else {
+        refIndex = Number.parseInt(t, 10);
+      }
+      return refIndex === correctIndex ? 'the correct choice' : 'another choice';
+    });
+    if (!mutated || next === current) {
+      current = next;
+      break;
+    }
+    current = next;
+  }
+  return current;
+}
+
 async function processPassageBatch(
   supabase: ReturnType<typeof createAdminClient>,
   provider: ReturnType<typeof getProvider>,
@@ -345,9 +391,16 @@ async function processPassageBatch(
     verified.push(candidateQ);
   }
 
-  // e. Insert verified questions.
+  // e. Insert verified questions. Run repairLetterRefs() on each explanation
+  //    immediately before insert to scrub any surviving "Choice A" / "Option B"
+  //    references — belt-and-suspenders for the prompt-level instruction.
   let inserts = 0;
   for (const q of verified) {
+    const cleanedExplanation = repairLetterRefs(
+      q.explanation,
+      answerKeyToIndex(q.answer_key),
+      q.choices,
+    );
     const { error } = await supabase
       .schema('act')
       .from('questions')
@@ -360,7 +413,7 @@ async function processPassageBatch(
         stem: q.stem,
         choices: q.choices,
         answer_key: q.answer_key,
-        explanation: q.explanation,
+        explanation: cleanedExplanation,
       });
     if (error) {
       if (error.code !== '23505') {
@@ -432,6 +485,12 @@ async function processMathBatch(
       continue;
     }
 
+    // Scrub any "Choice A" / "Option B" residuals before insert.
+    const cleanedExplanation = repairLetterRefs(
+      candidateQ.explanation,
+      intendedIndex,
+      candidateQ.choices,
+    );
     const { error } = await supabase
       .schema('act')
       .from('questions')
@@ -444,7 +503,7 @@ async function processMathBatch(
         stem: candidateQ.stem,
         choices: candidateQ.choices,
         answer_key: candidateQ.answer_key,
-        explanation: candidateQ.explanation,
+        explanation: cleanedExplanation,
       });
     if (error) {
       if (error.code !== '23505') {
