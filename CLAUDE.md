@@ -141,6 +141,21 @@ from any review surface; admins triage flags at `/admin/flags`.
 
 - **`resolveFlag(formData)` accepts a status of `resolved` or `dismissed`.** The action validates both ids via the form payload and stamps `resolved_at = now()` on both terminal states (the column name is historical; "dismissed" still gets a timestamp). The `FlagRow` component renders two separate forms (Mark Resolved + Dismiss) that POST to the same action with different hidden `status` inputs. Both are admin-only — `requireAdmin()` runs before the write.
 
+## Scoring v2
+
+- **`act.score_scales` is now seeded by a power-function curve, not linear interp.** Migration [`supabase/migrations/20260526070000_act_score_scales_v2.sql`](supabase/migrations/20260526070000_act_score_scales_v2.sql) truncates and reseeds with `scaled = round(1 + 35 * (raw/max_raw)^EXPONENT)` clamped `[1, 36]`. Per-section exponents: English/Reading `0.65`, Math/Science `0.70`. The curve is concave (exponent < 1) — more forgiving in the middle. Raw 50% scores now map to scaled ≈ 22-23 (was 18 with the linear v1). Endpoints unchanged (raw 0 → 1, raw max → 36); per-section row counts unchanged (51/46/37/41, total 175).
+
+- **A future v3 could swap in an actual ACT-published scale table** via an identical-shape migration (truncate + reinsert per `(section, raw_score) → scaled_score`). No app code change required — the section/composite scoring path reads from `act.score_scales` only.
+
+## Calculator on Math
+
+The Math section now has a floating Desmos scientific calculator overlay,
+mirroring the SAT app's `<CalculatorPanel/>` pattern.
+
+- Lives in [`app/components/test/CalculatorPanel.tsx`](app/components/test/CalculatorPanel.tsx) — a `'use client'` floating overlay (bottom-right, fixed) with a `<iframe src="https://www.desmos.com/scientific?embed">` and a close button. The iframe is only mounted while the panel is open, so it is effectively lazy-loaded on first open.
+- Math-only — [`app/components/test/MathRunner.tsx`](app/components/test/MathRunner.tsx) owns the open/closed `useState` and renders both the toggle button (top-right of the Math column) and the panel itself. Because the state is scoped to `MathRunner`, navigating to English / Reading / Science unmounts the runner and the panel disappears automatically — no explicit cleanup needed. Do NOT lift this state up; keep it in `MathRunner`. The calculator is NOT rendered on `EnglishRunner` / `TwoPaneRunner` (Reading / Science), matching the real ACT (calculator allowed on Math only).
+- Upgrade to graphing: swap the iframe src to `https://www.desmos.com/calculator?embed`. The real ACT permits any calculator on Math (including graphing); the scientific embed is the lighter default.
+
 ## Foundation followups (deferred to sub-project #2 or earlier)
 
 - **Preview env vars not set on Vercel.** Vercel CLI 54.4.1 rejected `vercel env add ... preview --yes` due to a `git_branch_required` prompt that wouldn't dismiss. Production + Development env vars are set; Preview needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET` set via the dashboard or `--value` CLI form.
