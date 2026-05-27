@@ -103,6 +103,17 @@ export default function LoginPage() {
             See how it works
           </Link>
         </p>
+        <p className="mt-3 text-center text-xs text-slate-500">
+          Preparing for the SAT instead?{' '}
+          <a
+            href="https://sat-app-opal.vercel.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            Try our SAT practice app
+          </a>
+        </p>
       </CardContent>
     </Card>
   );
