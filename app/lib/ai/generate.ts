@@ -12,6 +12,7 @@ import {
   type ActSection,
 } from '@/app/lib/act/format';
 import { createAdminClient } from '@/app/lib/supabase/admin';
+import { verbalToNumeric, type Difficulty } from './prompts/_difficulty';
 
 // Targets per spec §6. Generation picks the bucket with the lowest fill ratio
 // (count / target) first; the planner returns up to maxBatches buckets.
@@ -25,16 +26,43 @@ const PASSAGE_TARGETS: Record<PassageType, number> = {
   research_summaries: 15,
   conflicting_viewpoints: 8,
 };
-const MATH_TARGET = 60;
+
+// Per-skill math targets split across difficulty. Total per skill = 60 (same
+// as the previous flat MATH_TARGET); the planner now targets the thinnest
+// (skill, difficulty) cell rather than the thinnest skill.
+const MATH_TARGETS_BY_DIFFICULTY: Record<Difficulty, number> = {
+  easy: 20,
+  medium: 25,
+  hard: 15,
+};
 const MATH_BATCH_SIZE = 3;
 
+const DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'] as const;
+
+function randomDifficulty(): Difficulty {
+  return DIFFICULTIES[Math.floor(Math.random() * DIFFICULTIES.length)];
+}
+
 type Batch =
-  | { kind: 'passage'; passage_type: PassageType; fillRatio: number }
-  | { kind: 'math_standalone'; skill: string; fillRatio: number };
+  | {
+      kind: 'passage';
+      passage_type: PassageType;
+      difficulty: Difficulty;
+      fillRatio: number;
+    }
+  | {
+      kind: 'math_standalone';
+      skill: string;
+      difficulty: Difficulty;
+      fillRatio: number;
+    };
 
 interface BufferCounts {
+  // Passages count is per passage_type (not bucketed by difficulty — passages
+  // get difficulty assigned uniformly random at plan time).
   passages: Partial<Record<PassageType, number>>;
-  math: Partial<Record<string, number>>;
+  // Math is per (skill, difficulty) cell. 3 cells per skill × 3 skills = 9 cells.
+  math: Partial<Record<string, Partial<Record<Difficulty, number>>>>;
 }
 
 interface RunError {
@@ -69,6 +97,13 @@ function sectionForPassageType(p: PassageType): ActSection {
   return 'science';
 }
 
+function numericToVerbal(n: number | null | undefined): Difficulty | null {
+  if (n === 2) return 'easy';
+  if (n === 3) return 'medium';
+  if (n === 4) return 'hard';
+  return null;
+}
+
 async function readBufferCounts(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<BufferCounts> {
@@ -86,18 +121,24 @@ async function readBufferCounts(
     out.passages[t] = (out.passages[t] ?? 0) + 1;
   }
 
-  // Math standalone questions grouped by skill, enabled-only.
+  // Math standalone questions grouped by (skill, difficulty), enabled-only.
+  // Difficulty is the smallint column on act.questions; values 2/3/4 map to
+  // easy/medium/hard. Rows with other values (1, 5, or NULL) are ignored
+  // for the per-(skill, difficulty) cell counts — they don't block targeting.
   const { data: mathRows, error: mathErr } = await supabase
     .schema('act')
     .from('questions')
-    .select('skill')
+    .select('skill, difficulty')
     .eq('enabled', true)
     .eq('section', 'math')
     .is('passage_id', null);
   if (mathErr) throw mathErr;
   for (const row of mathRows ?? []) {
-    const s = (row as { skill: string }).skill;
-    out.math[s] = (out.math[s] ?? 0) + 1;
+    const r = row as { skill: string; difficulty: number | null };
+    const verbal = numericToVerbal(r.difficulty);
+    if (!verbal) continue;
+    const skillBucket = (out.math[r.skill] ??= {});
+    skillBucket[verbal] = (skillBucket[verbal] ?? 0) + 1;
   }
   return out;
 }
@@ -105,6 +146,8 @@ async function readBufferCounts(
 function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
   const batches: Batch[] = [];
 
+  // Passages: one candidate per passage_type. Difficulty picked uniformly
+  // random per batch; there's no per-difficulty quota on passage buckets.
   for (const [pt, target] of Object.entries(PASSAGE_TARGETS) as Array<
     [PassageType, number]
   >) {
@@ -113,19 +156,26 @@ function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
       batches.push({
         kind: 'passage',
         passage_type: pt,
+        difficulty: randomDifficulty(),
         fillRatio: have / target,
       });
     }
   }
 
+  // Math: one candidate per (skill, difficulty) cell — 3 cells per skill × 3
+  // skills = 9 cells. Pick the thinnest cells across the whole math grid.
   for (const skill of SKILLS.math) {
-    const have = buffers.math[skill] ?? 0;
-    if (have < MATH_TARGET) {
-      batches.push({
-        kind: 'math_standalone',
-        skill,
-        fillRatio: have / MATH_TARGET,
-      });
+    for (const difficulty of DIFFICULTIES) {
+      const target = MATH_TARGETS_BY_DIFFICULTY[difficulty];
+      const have = buffers.math[skill]?.[difficulty] ?? 0;
+      if (have < target) {
+        batches.push({
+          kind: 'math_standalone',
+          skill,
+          difficulty,
+          fillRatio: have / target,
+        });
+      }
     }
   }
 
@@ -134,7 +184,9 @@ function planBatches(buffers: BufferCounts, maxBatches: number): Batch[] {
 }
 
 function bucketLabel(b: Batch): string {
-  return b.kind === 'passage' ? `passage:${b.passage_type}` : `math:${b.skill}`;
+  return b.kind === 'passage'
+    ? `passage:${b.passage_type}:${b.difficulty}`
+    : `math:${b.skill}:${b.difficulty}`;
 }
 
 export async function runGeneration(opts?: {
@@ -163,6 +215,7 @@ export async function runGeneration(opts?: {
           supabase,
           provider,
           batch.passage_type,
+          batch.difficulty,
           bucket,
           errors,
         );
@@ -171,6 +224,7 @@ export async function runGeneration(opts?: {
           supabase,
           provider,
           batch.skill,
+          batch.difficulty,
           bucket,
           errors,
         );
@@ -274,11 +328,12 @@ async function processPassageBatch(
   supabase: ReturnType<typeof createAdminClient>,
   provider: ReturnType<typeof getProvider>,
   passageType: PassageType,
+  difficulty: Difficulty,
   bucket: string,
   errors: RunError[],
 ): Promise<number> {
   // a. Generate passage.
-  const candidate = await provider.generatePassage(passageType);
+  const candidate = await provider.generatePassage(passageType, difficulty);
   const parsedPassage = passageCandidateSchema.safeParse(candidate);
   if (!parsedPassage.success) {
     throw new Error(
@@ -320,6 +375,7 @@ async function processPassageBatch(
     passageType,
     passageBody: passage.body,
     passageStimuli: passage.stimuli,
+    difficulty,
   });
 
   // d. Validate + self-verify each question; drop ones the model can't re-solve.
@@ -394,6 +450,7 @@ async function processPassageBatch(
   // e. Insert verified questions. Run repairLetterRefs() on each explanation
   //    immediately before insert to scrub any surviving "Choice A" / "Option B"
   //    references — belt-and-suspenders for the prompt-level instruction.
+  const numericDifficulty = verbalToNumeric(difficulty);
   let inserts = 0;
   for (const q of verified) {
     const cleanedExplanation = repairLetterRefs(
@@ -407,7 +464,7 @@ async function processPassageBatch(
       .insert({
         section: q.section,
         skill: q.skill,
-        difficulty: 3,
+        difficulty: numericDifficulty,
         passage_id: passageId,
         passage_marker: q.passage_marker ?? null,
         stem: q.stem,
@@ -430,10 +487,16 @@ async function processMathBatch(
   supabase: ReturnType<typeof createAdminClient>,
   provider: ReturnType<typeof getProvider>,
   skill: string,
+  difficulty: Difficulty,
   bucket: string,
   errors: RunError[],
 ): Promise<number> {
-  const rawQuestions = await provider.generateMathStandalone(skill, MATH_BATCH_SIZE);
+  const rawQuestions = await provider.generateMathStandalone(
+    skill,
+    MATH_BATCH_SIZE,
+    difficulty,
+  );
+  const numericDifficulty = verbalToNumeric(difficulty);
   let inserts = 0;
   for (let qi = 0; qi < rawQuestions.length; qi++) {
     const q = rawQuestions[qi];
@@ -497,7 +560,7 @@ async function processMathBatch(
       .insert({
         section: 'math',
         skill: candidateQ.skill,
-        difficulty: 3,
+        difficulty: numericDifficulty,
         passage_id: null,
         passage_marker: null,
         stem: candidateQ.stem,

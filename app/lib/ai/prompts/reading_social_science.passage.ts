@@ -1,5 +1,12 @@
-export function buildReadingSocialSciencePassage(): string {
+import { difficultyBlock, type Difficulty } from './_difficulty';
+
+export function buildReadingSocialSciencePassage(
+  difficulty: Difficulty,
+): string {
   return `Generate one ACT Reading "Social Science" passage.
+${difficultyBlock(difficulty)}
+The passage's vocabulary level AND the implied difficulty of any questions written from it must match the target difficulty.
+
 Return ONLY a JSON object — no prose, no markdown fences.
 {
   "passage_type": "social_science",

@@ -1,3 +1,5 @@
+import { difficultyBlock, type Difficulty } from './_difficulty';
+
 const STYLES = [
   {
     key: 'personal_narrative',
@@ -26,9 +28,12 @@ const STYLES = [
   },
 ];
 
-export function buildEnglishEssayPassage(): string {
+export function buildEnglishEssayPassage(difficulty: Difficulty): string {
   const style = STYLES[Math.floor(Math.random() * STYLES.length)];
   return `Generate one ACT English passage in this style: ${style.description}
+
+${difficultyBlock(difficulty)}
+The passage's vocabulary level AND the implied difficulty of any questions written from it must match the target difficulty.
 
 Return ONLY a JSON object — no prose, no markdown fences.
 {

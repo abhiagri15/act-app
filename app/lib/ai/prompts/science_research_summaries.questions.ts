@@ -1,8 +1,10 @@
 import { PASSAGE_QUESTION_COUNTS, SKILLS } from '@/app/lib/act/format';
 import type { Stimulus } from '../provider';
+import { difficultyBlock, type Difficulty } from './_difficulty';
 
 export function buildScienceResearchSummariesQuestionsPrompt(
   passageBody: string,
+  difficulty: Difficulty,
   passageStimuli?: Stimulus[],
 ): string {
   const count = PASSAGE_QUESTION_COUNTS.research_summaries; // 6
@@ -10,6 +12,9 @@ export function buildScienceResearchSummariesQuestionsPrompt(
   const stimuliJson = JSON.stringify(passageStimuli ?? [], null, 2);
   return `Generate ${count} ACT Science questions targeting this Research Summaries passage.
 Return ONLY a JSON array of ${count} objects — no prose, no markdown fences.
+
+${difficultyBlock(difficulty)}
+ALL ${count} questions must be at the target difficulty (not a mix).
 
 Passage body (verbatim):
 """

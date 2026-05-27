@@ -1,5 +1,12 @@
-export function buildScienceConflictingViewpointsPassage(): string {
+import { difficultyBlock, type Difficulty } from './_difficulty';
+
+export function buildScienceConflictingViewpointsPassage(
+  difficulty: Difficulty,
+): string {
   return `Generate one ACT Science "Conflicting Viewpoints" passage.
+${difficultyBlock(difficulty)}
+The passage's vocabulary level AND the implied difficulty of any questions written from it must match the target difficulty.
+
 Return ONLY a JSON object — no prose, no markdown fences.
 {
   "passage_type": "conflicting_viewpoints",

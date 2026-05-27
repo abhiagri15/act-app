@@ -1,6 +1,7 @@
 import type { PassageType } from '@/app/lib/act/format';
 import type { PassageCandidate, QuestionCandidate } from './schema';
 import { OllamaCloudProvider } from './ollama';
+import type { Difficulty } from './prompts/_difficulty';
 
 export type Stimulus = {
   kind: 'table' | 'figure';
@@ -11,7 +12,10 @@ export type Stimulus = {
 export interface AIProvider {
   // Generate one passage of the given type. Caller inserts into act.passages
   // and then calls generateQuestionsForPassage with the resulting body.
-  generatePassage(passageType: PassageType): Promise<PassageCandidate>;
+  generatePassage(
+    passageType: PassageType,
+    difficulty: Difficulty,
+  ): Promise<PassageCandidate>;
 
   // Generate exactly PASSAGE_QUESTION_COUNTS[passageType] questions targeting
   // a freshly-inserted passage.
@@ -19,12 +23,14 @@ export interface AIProvider {
     passageType: PassageType;
     passageBody: string;
     passageStimuli?: Stimulus[];
+    difficulty: Difficulty;
   }): Promise<QuestionCandidate[]>;
 
   // Generate `count` standalone Math questions for the given skill.
   generateMathStandalone(
     skill: string,
     count: number,
+    difficulty: Difficulty,
   ): Promise<QuestionCandidate[]>;
 
   // Re-solve a question for self-verify. Returns the model's independent

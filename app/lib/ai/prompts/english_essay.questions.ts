@@ -1,10 +1,17 @@
 import { PASSAGE_QUESTION_COUNTS, SKILLS } from '@/app/lib/act/format';
+import { difficultyBlock, type Difficulty } from './_difficulty';
 
-export function buildEnglishEssayQuestionsPrompt(passageBody: string): string {
+export function buildEnglishEssayQuestionsPrompt(
+  passageBody: string,
+  difficulty: Difficulty,
+): string {
   const count = PASSAGE_QUESTION_COUNTS.english_essay; // 10
   const skills = SKILLS.english.join(', ');
   return `Generate ${count} ACT English questions targeting this passage.
 Return ONLY a JSON array of ${count} objects — no prose, no markdown fences.
+
+${difficultyBlock(difficulty)}
+ALL ${count} questions must be at the target difficulty (not a mix).
 
 Passage (verbatim — do NOT modify it):
 """

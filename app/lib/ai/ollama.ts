@@ -1,6 +1,7 @@
 import type { AIProvider, Stimulus } from './provider';
 import type { PassageCandidate, QuestionCandidate } from './schema';
 import type { PassageType } from '@/app/lib/act/format';
+import type { Difficulty } from './prompts/_difficulty';
 
 import { buildEnglishEssayPassage } from './prompts/english_essay.passage';
 import { buildEnglishEssayQuestionsPrompt } from './prompts/english_essay.questions';
@@ -77,8 +78,11 @@ function extractJson(text: string): unknown {
 }
 
 export class OllamaCloudProvider implements AIProvider {
-  async generatePassage(passageType: PassageType): Promise<PassageCandidate> {
-    const prompt = passagePromptBuilders[passageType]();
+  async generatePassage(
+    passageType: PassageType,
+    difficulty: Difficulty,
+  ): Promise<PassageCandidate> {
+    const prompt = passagePromptBuilders[passageType](difficulty);
     const content = await chat(prompt);
     const parsed = extractJson(content);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -100,9 +104,14 @@ export class OllamaCloudProvider implements AIProvider {
     passageType: PassageType;
     passageBody: string;
     passageStimuli?: Stimulus[];
+    difficulty: Difficulty;
   }): Promise<QuestionCandidate[]> {
     const builder = questionsPromptBuilders[input.passageType];
-    const prompt = builder(input.passageBody, input.passageStimuli);
+    const prompt = builder(
+      input.passageBody,
+      input.difficulty,
+      input.passageStimuli,
+    );
     const content = await chat(prompt);
     const parsed = extractJson(content);
     if (!Array.isArray(parsed)) {
@@ -116,12 +125,13 @@ export class OllamaCloudProvider implements AIProvider {
   async generateMathStandalone(
     skill: string,
     count: number,
+    difficulty: Difficulty,
   ): Promise<QuestionCandidate[]> {
     const builder = mathPromptBuilders[skill];
     if (!builder) {
       throw new Error(`generateMathStandalone: unknown skill "${skill}"`);
     }
-    const prompt = builder(count);
+    const prompt = builder(count, difficulty);
     const content = await chat(prompt);
     const parsed = extractJson(content);
     if (!Array.isArray(parsed)) {
@@ -222,7 +232,10 @@ export class OllamaCloudProvider implements AIProvider {
   }
 }
 
-const passagePromptBuilders: Record<PassageType, () => string> = {
+const passagePromptBuilders: Record<
+  PassageType,
+  (difficulty: Difficulty) => string
+> = {
   english_essay: buildEnglishEssayPassage,
   literary_narrative: buildReadingLiteraryNarrativePassage,
   social_science: buildReadingSocialSciencePassage,
@@ -235,22 +248,27 @@ const passagePromptBuilders: Record<PassageType, () => string> = {
 
 const questionsPromptBuilders: Record<
   PassageType,
-  (body: string, stimuli?: Stimulus[]) => string
+  (body: string, difficulty: Difficulty, stimuli?: Stimulus[]) => string
 > = {
-  english_essay: (body) => buildEnglishEssayQuestionsPrompt(body),
-  literary_narrative: (body) => buildReadingLiteraryNarrativeQuestionsPrompt(body),
-  social_science: (body) => buildReadingSocialScienceQuestionsPrompt(body),
-  humanities: (body) => buildReadingHumanitiesQuestionsPrompt(body),
-  natural_science: (body) => buildReadingNaturalScienceQuestionsPrompt(body),
-  data_representation: (body, stim) =>
-    buildScienceDataRepresentationQuestionsPrompt(body, stim),
-  research_summaries: (body, stim) =>
-    buildScienceResearchSummariesQuestionsPrompt(body, stim),
-  conflicting_viewpoints: (body, stim) =>
-    buildScienceConflictingViewpointsQuestionsPrompt(body, stim),
+  english_essay: (body, d) => buildEnglishEssayQuestionsPrompt(body, d),
+  literary_narrative: (body, d) =>
+    buildReadingLiteraryNarrativeQuestionsPrompt(body, d),
+  social_science: (body, d) => buildReadingSocialScienceQuestionsPrompt(body, d),
+  humanities: (body, d) => buildReadingHumanitiesQuestionsPrompt(body, d),
+  natural_science: (body, d) =>
+    buildReadingNaturalScienceQuestionsPrompt(body, d),
+  data_representation: (body, d, stim) =>
+    buildScienceDataRepresentationQuestionsPrompt(body, d, stim),
+  research_summaries: (body, d, stim) =>
+    buildScienceResearchSummariesQuestionsPrompt(body, d, stim),
+  conflicting_viewpoints: (body, d, stim) =>
+    buildScienceConflictingViewpointsQuestionsPrompt(body, d, stim),
 };
 
-const mathPromptBuilders: Record<string, (count: number) => string> = {
+const mathPromptBuilders: Record<
+  string,
+  (count: number, difficulty: Difficulty) => string
+> = {
   preparing_for_higher_math: buildPreparingForHigherMathPrompt,
   integrating_essential_skills: buildIntegratingEssentialSkillsPrompt,
   modeling: buildModelingMathPrompt,

@@ -1,6 +1,14 @@
-export function buildPreparingForHigherMathPrompt(count: number): string {
+import { difficultyBlock, type Difficulty } from './_difficulty';
+
+export function buildPreparingForHigherMathPrompt(
+  count: number,
+  difficulty: Difficulty,
+): string {
   return `Generate ${count} original ACT Math multiple-choice questions for the skill "preparing_for_higher_math".
 Return ONLY a JSON array of ${count} objects — no prose, no markdown fences.
+
+${difficultyBlock(difficulty)}
+ALL ${count} questions must be at the target difficulty (not a mix).
 
 Each object has exactly these keys:
 - "section": must be "math"

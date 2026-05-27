@@ -1,14 +1,19 @@
 import { PASSAGE_QUESTION_COUNTS, SKILLS } from '@/app/lib/act/format';
 import type { Stimulus } from '../provider';
+import { difficultyBlock, type Difficulty } from './_difficulty';
 
 export function buildScienceConflictingViewpointsQuestionsPrompt(
   passageBody: string,
+  difficulty: Difficulty,
   _passageStimuli?: Stimulus[],
 ): string {
   const count = PASSAGE_QUESTION_COUNTS.conflicting_viewpoints; // 7
   const skills = SKILLS.science.join(', ');
   return `Generate ${count} ACT Science questions targeting this Conflicting Viewpoints passage.
 Return ONLY a JSON array of ${count} objects — no prose, no markdown fences.
+
+${difficultyBlock(difficulty)}
+ALL ${count} questions must be at the target difficulty (not a mix).
 
 Passage body (verbatim):
 """

@@ -1,12 +1,17 @@
 import { PASSAGE_QUESTION_COUNTS, SKILLS } from '@/app/lib/act/format';
+import { difficultyBlock, type Difficulty } from './_difficulty';
 
 export function buildReadingSocialScienceQuestionsPrompt(
   passageBody: string,
+  difficulty: Difficulty,
 ): string {
   const count = PASSAGE_QUESTION_COUNTS.social_science; // 9
   const skills = SKILLS.reading.join(', ');
   return `Generate ${count} ACT Reading questions targeting this Social Science passage.
 Return ONLY a JSON array of ${count} objects — no prose, no markdown fences.
+
+${difficultyBlock(difficulty)}
+ALL ${count} questions must be at the target difficulty (not a mix).
 
 Passage (verbatim — do NOT modify it):
 """
