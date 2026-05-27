@@ -28,6 +28,7 @@ const TABS: Tab[] = [
   { label: 'Passages', href: '/admin/passages' },
   { label: 'Users', href: '/admin/users' },
   { label: 'Generation', href: '/admin/generation' },
+  { label: 'Pool Floor', href: '/admin/floor-status' },
   { label: 'Open Flags', href: '/admin/flags', badgeKey: 'openFlagCount' },
   { label: 'Settings', href: '/admin/settings' },
 ];

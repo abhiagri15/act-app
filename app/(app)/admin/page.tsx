@@ -2,18 +2,21 @@ import Link from 'next/link';
 import { getPoolCounts } from '@/app/lib/admin/queries';
 import { listUsersWithStats } from '@/app/lib/admin/users';
 import { countOpenFlags } from '@/app/lib/admin/flags';
+import { getFloorStatus } from '@/app/lib/admin/floor';
 import { getDailyLimit } from '@/app/lib/config';
 
 // /admin — Overview dashboard. Stat cards summarising the pool, user
 // count, open flags (sub-project #7), and the daily attempt limit. The
 // layout already requires admin via requireAdmin(); no need to re-check.
 export default async function AdminOverviewPage() {
-  const [pool, users, openFlagCount, dailyLimit] = await Promise.all([
-    getPoolCounts(),
-    listUsersWithStats(),
-    countOpenFlags(),
-    getDailyLimit(),
-  ]);
+  const [pool, users, openFlagCount, floorStatus, dailyLimit] =
+    await Promise.all([
+      getPoolCounts(),
+      listUsersWithStats(),
+      countOpenFlags(),
+      getFloorStatus(),
+      getDailyLimit(),
+    ]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -22,7 +25,7 @@ export default async function AdminOverviewPage() {
         Pool moderation, user activity, generation activity, and app settings.
       </p>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
           href="/admin/questions"
           title="Question Pool"
@@ -58,6 +61,16 @@ export default async function AdminOverviewPage() {
           lines={[
             `User-reported question problems.`,
             `Mark resolved or dismiss from /admin/flags.`,
+          ]}
+        />
+        <StatCard
+          href="/admin/floor-status"
+          title="Pool floor status"
+          headline={`${floorStatus.below_floor_count} of ${floorStatus.rows.length} below floor`}
+          warn={floorStatus.below_floor_count > 0}
+          lines={[
+            `Skill floor ${floorStatus.skill_floor} · Passage floor ${floorStatus.passage_floor}.`,
+            `Generator prioritizes below-floor cells.`,
           ]}
         />
         <StatCard
@@ -104,22 +117,31 @@ function StatCard({
   title,
   headline,
   lines,
+  warn,
 }: {
   href: string;
   title: string;
   headline: string;
   lines: string[];
+  warn?: boolean;
 }) {
+  const cls = warn
+    ? 'block rounded-lg border border-amber-300 bg-amber-50 p-4 transition hover:border-amber-400 hover:bg-amber-100'
+    : 'block rounded-lg border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50';
+  const titleCls = warn
+    ? 'text-xs font-medium uppercase tracking-wide text-amber-700'
+    : 'text-xs font-medium uppercase tracking-wide text-slate-500';
+  const headCls = warn
+    ? 'mt-1 text-2xl font-semibold text-amber-900'
+    : 'mt-1 text-2xl font-semibold text-slate-900';
+  const lineCls = warn
+    ? 'mt-2 space-y-0.5 text-xs text-amber-900'
+    : 'mt-2 space-y-0.5 text-xs text-slate-600';
   return (
-    <Link
-      href={href}
-      className="block rounded-lg border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50"
-    >
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-        {title}
-      </p>
-      <p className="mt-1 text-2xl font-semibold text-slate-900">{headline}</p>
-      <div className="mt-2 space-y-0.5 text-xs text-slate-600">
+    <Link href={href} className={cls}>
+      <p className={titleCls}>{title}</p>
+      <p className={headCls}>{headline}</p>
+      <div className={lineCls}>
         {lines.map((l, i) => (
           <p key={i}>{l}</p>
         ))}

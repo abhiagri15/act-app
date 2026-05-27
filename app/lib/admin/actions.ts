@@ -83,6 +83,47 @@ export async function resolveFlag(formData: FormData): Promise<void> {
   revalidatePath('/admin/flags');
 }
 
+// Update the question-pool floor gates (act.app_config). Admin-only; writes
+// via the service-role client (app_config has no write policy). runGeneration()
+// re-reads the floors on every run.
+//
+// skill range: 0..50 (matches the SQL CHECK constraint).
+// passage range: 0..20.
+export async function setFloorConfig(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const skill = Number.parseInt(
+    String(formData.get('min_skill_floor') ?? ''),
+    10,
+  );
+  const passage = Number.parseInt(
+    String(formData.get('min_passage_floor') ?? ''),
+    10,
+  );
+  if (!Number.isInteger(skill) || skill < 0 || skill > 50) {
+    throw new Error('Skill floor must be a whole number between 0 and 50.');
+  }
+  if (!Number.isInteger(passage) || passage < 0 || passage > 20) {
+    throw new Error('Passage floor must be a whole number between 0 and 20.');
+  }
+  const admin = createAdminClient();
+  const { error } = await admin
+    .schema('act')
+    .from('app_config')
+    .update({
+      min_skill_floor: skill,
+      min_passage_floor: passage,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', 1);
+  if (error) {
+    console.error('[setFloorConfig] failed:', error);
+    throw new Error('Failed to update the floor configuration.');
+  }
+  revalidatePath('/admin');
+  revalidatePath('/admin/settings');
+  revalidatePath('/admin/floor-status');
+}
+
 // Update the app-wide daily test-attempt limit (act.app_config). Admin-only;
 // writes via the service-role client (app_config has no write policy).
 // act.draw_test re-reads the limit on every call.
