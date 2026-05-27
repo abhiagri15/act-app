@@ -1,57 +1,52 @@
-import {
-  SECTION_QUESTION_COUNTS,
-  SECTION_DURATIONS_SEC,
-  BREAK_DURATION_SEC,
-} from '@/app/lib/act/format';
+// app/how-it-works/page.tsx
+//
+// Public-facing explainer for the ACT app. Single fetch site for live pool
+// numbers; the Hero and PoolComposition components receive stats as props.
+// All other sections are content-only.
+//
+// ISR: revalidate=3600. The page HTML is regenerated at most once an hour.
+// If the pool-stats query fails the page still renders — Hero hides the
+// stat strip, PoolComposition shows a "temporarily unavailable" fallback.
+//
+// The route is in middleware.ts PUBLIC_PATHS, so it is reachable signed-out.
 
-export default function HowItWorksPage() {
-  const fmt = (sec: number) => `${Math.round(sec / 60)} min`;
+import { getPublicPoolStats } from '@/app/lib/marketing/queries';
+import { MarketingHeader } from './_components/MarketingHeader';
+import { MarketingFooter } from './_components/MarketingFooter';
+import { AnchorNav } from './_components/AnchorNav';
+import { Hero } from './_components/Hero';
+import { HowItWorks } from './_components/HowItWorks';
+import { Parity } from './_components/Parity';
+import { QuestionPipeline } from './_components/QuestionPipeline';
+import { PoolComposition } from './_components/PoolComposition';
+import { WhatYouGet } from './_components/WhatYouGet';
+import { FaqAccordion } from './_components/FaqAccordion';
+import { CtaFooter } from './_components/CtaFooter';
+
+export const revalidate = 3600;
+
+export const metadata = {
+  title: 'How it works — ACT Practice',
+  description:
+    'Enhanced ACT (2025+) practice with section-locked timers, real 1–36 scoring, and AI-generated content cross-checked by a three-model quality vote.',
+};
+
+export default async function HowItWorksPage() {
+  const stats = await getPublicPoolStats();
+
   return (
-    <main className="max-w-2xl mx-auto px-6 py-12 space-y-6">
-      <h1 className="text-3xl font-semibold">How it works</h1>
-      <p className="text-muted-foreground">
-        This app simulates the Enhanced ACT (2025+). Each test is a fixed
-        sequence of four sections with strict, section-locked timers.
-      </p>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b">
-            <th className="text-left py-2">Section</th>
-            <th className="text-left py-2">Questions</th>
-            <th className="text-left py-2">Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="border-b">
-            <td className="py-2">English</td>
-            <td>{SECTION_QUESTION_COUNTS.english}</td>
-            <td>{fmt(SECTION_DURATIONS_SEC.english)}</td>
-          </tr>
-          <tr className="border-b">
-            <td className="py-2">Math</td>
-            <td>{SECTION_QUESTION_COUNTS.math}</td>
-            <td>{fmt(SECTION_DURATIONS_SEC.math)}</td>
-          </tr>
-          <tr className="border-b">
-            <td className="py-2 italic text-muted-foreground">Break</td>
-            <td>—</td>
-            <td>{fmt(BREAK_DURATION_SEC)}</td>
-          </tr>
-          <tr className="border-b">
-            <td className="py-2">Reading</td>
-            <td>{SECTION_QUESTION_COUNTS.reading}</td>
-            <td>{fmt(SECTION_DURATIONS_SEC.reading)}</td>
-          </tr>
-          <tr>
-            <td className="py-2">Science (optional)</td>
-            <td>{SECTION_QUESTION_COUNTS.science}</td>
-            <td>{fmt(SECTION_DURATIONS_SEC.science)}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p className="text-sm text-muted-foreground">
-        Composite score 1–36, average of included section scaled scores.
-      </p>
-    </main>
+    <div className="min-h-screen bg-white">
+      <MarketingHeader />
+      <AnchorNav />
+      <Hero stats={stats} />
+      <HowItWorks />
+      <Parity />
+      <QuestionPipeline />
+      <PoolComposition stats={stats} />
+      <WhatYouGet />
+      <FaqAccordion />
+      <CtaFooter />
+      <MarketingFooter />
+    </div>
   );
 }
