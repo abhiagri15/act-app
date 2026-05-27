@@ -83,6 +83,13 @@ Tag chain: `post-foundation` → `post-auth` → `post-ai` → `post-persistence
 
 - **The n8n workflow `Parse Q Candidates` / `Parse Math Candidates` nodes now run `repairLetterRefs()` too** (matching the Vercel cron path). Previously only the TypeScript `runGeneration` cleaned explanations; the n8n branch shipped raw model output. Both code paths share the same regex `/\b(Choice|Option)\s+([A-Da-d]|[0-3])\b/gi` and the same "correct-vs-another" mapping. Mirror change required: if you update one, update the other.
 
+- **n8n (primary path) uses 3 different models for a vote pattern** (mirrors SAT's `kFGnGakMnPQH4nNj`). The ACT Config Provider workflow (`ghVKwVwYjB7T2vPY`) exposes:
+  - `ollamaGenerateModel` — DeepSeek v4-pro (question + passage generation)
+  - `ollamaSolveModel` — Gemini 3-flash-preview (cross-provider self-verify + multi-validity check)
+  - `ollamaTiebreakModel` — Gemma 4 (third opinion when generator and solver disagree)
+
+  The vote algorithm in the main generator workflow (`TTq4YrS1c1qqdUmt`, now 30 nodes): generator produces a candidate with claimed `answer_key` → solver re-solves with a DIFFERENT model → if they agree, the candidate proceeds to the multi-validity gate; if they disagree, the tiebreaker votes → 2-of-3 majority wins, otherwise the candidate is dropped. Cross-provider diversity (DeepSeek + Gemini + Gemma) means the 3 models have independent blind spots — catches more bugs than 3 calls to the same model. **The Vercel cron path (`app/lib/ai/generate.ts`) stays single-model on purpose** — it's the cheap daily backup; quality work happens in n8n's hourly run. Update both Config Provider (sub-workflow) and main generator together if you change model assignments.
+
 ## Persistence sub-project (sub-project #4) gotchas
 
 - **`act.get_my_attempt` gates `answer_key` + `explanation` on `status`.** When `status='in_progress'`, both columns are STRIPPED from each question in the returned jsonb — the test runner never sees them. When `status='submitted'`, they are included for the review page. The gate is at the SQL layer (the function branches on the attempt's status), not in app code; a client that tries to "peek" at the answer mid-test gets nothing back. Do not move this gate to TypeScript — keep it in the RPC.
