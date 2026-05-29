@@ -27,14 +27,10 @@ export async function guardSectionRoute(
   }
 
   const cur = snapshot.current_section;
-  // First-mount of english: cur is null. Allowed.
-  if (cur !== null && cur !== routeSection) {
-    return { status: 'redirect', href: `/test/${attemptId}/${cur}` };
-  }
+  const stateMap = snapshot.section_state as Record<string, SectionStateEntry | undefined>;
 
-  // If we're on the current section, check lock + deadline.
+  // On the section the attempt currently points at: enforce lock + deadline.
   if (cur === routeSection) {
-    const stateMap = snapshot.section_state as Record<string, SectionStateEntry | undefined>;
     const sectionEntry = stateMap[cur];
     if (sectionEntry?.locked) {
       return { status: 'redirect', href: nextSectionHref(attemptId, cur, snapshot.include_science) };
@@ -50,9 +46,35 @@ export async function guardSectionRoute(
         return { status: 'redirect', href: nextSectionHref(attemptId, cur, snapshot.include_science) };
       }
     }
+    return { status: 'ok', snapshot };
   }
 
-  return { status: 'ok', snapshot };
+  // Fresh attempt — nothing started yet. English is the only valid entry.
+  if (cur === null) {
+    if (routeSection === 'english') return { status: 'ok', snapshot };
+    return { status: 'redirect', href: `/test/${attemptId}/english` };
+  }
+
+  // cur differs from the requested route. submit_section locks a section but
+  // does NOT advance current_section, and the break is never locked. So when
+  // the current section is "finished" — a locked content section, or the
+  // break the user just left — allow forward navigation to the immediately
+  // next section; the page's startSection() then advances current_section.
+  // This is what breaks the english<->math (and break<->reading) redirect loop.
+  const curFinished = cur === 'break' || stateMap[cur]?.locked === true;
+  const expectedNextHref = nextSectionHref(attemptId, cur, snapshot.include_science);
+  const requestedHref = `/test/${attemptId}/${routeSection}`;
+
+  if (curFinished) {
+    // Legitimate forward step → let startSection() take over. Any other
+    // target (skip / back to a locked section) → send them to the next one.
+    return expectedNextHref === requestedHref
+      ? { status: 'ok', snapshot }
+      : { status: 'redirect', href: expectedNextHref };
+  }
+
+  // Current section is still active (unlocked) — force the user back to it.
+  return { status: 'redirect', href: `/test/${attemptId}/${cur}` };
 }
 
 export function nextSectionHref(
