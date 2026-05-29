@@ -22,6 +22,16 @@ export function ResultsScreen({ results }: Props) {
     s === 'science' ? results.include_science : true,
   );
 
+  // Enhanced ACT: STEM = mean of Math + Science (only when Science was taken).
+  const mathScaled = results.scaled_scores['math'];
+  const scienceScaled = results.scaled_scores['science'];
+  const stem =
+    results.include_science &&
+    typeof mathScaled === 'number' &&
+    typeof scienceScaled === 'number'
+      ? Math.round((mathScaled + scienceScaled) / 2)
+      : null;
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <Card>
@@ -34,6 +44,16 @@ export function ResultsScreen({ results }: Props) {
               {results.composite ?? '—'}
             </div>
             <div className="mt-1 text-sm text-slate-500">of 36</div>
+            <div className="mt-1 text-xs text-slate-400">
+              Composite = average of English, Reading &amp; Math
+            </div>
+            {stem !== null && (
+              <div className="mt-3 text-sm text-slate-600">
+                STEM score:{' '}
+                <span className="font-semibold text-slate-800">{stem}</span>
+                <span className="text-slate-400"> / 36 · Math + Science</span>
+              </div>
+            )}
           </div>
 
           <h3 className="mb-2 text-sm font-medium text-slate-700">Section scaled scores</h3>
@@ -55,6 +75,11 @@ export function ResultsScreen({ results }: Props) {
                   {raw !== undefined && (
                     <div className="text-xs text-slate-500">
                       raw {raw}
+                    </div>
+                  )}
+                  {s === 'science' && (
+                    <div className="mt-0.5 text-[10px] uppercase tracking-wide text-amber-600">
+                      not in composite
                     </div>
                   )}
                 </div>

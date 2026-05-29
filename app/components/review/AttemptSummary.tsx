@@ -24,6 +24,17 @@ export function AttemptSummary({ snapshot }: { snapshot: AttemptSnapshot }) {
   const sections = SECTION_ORDER.filter((s) =>
     s === 'science' ? snapshot.include_science : true,
   );
+
+  // Enhanced ACT: STEM = mean of Math + Science (only when Science was taken).
+  const mathScaled = snapshot.scaled_scores['math'];
+  const scienceScaled = snapshot.scaled_scores['science'];
+  const stem =
+    snapshot.include_science &&
+    typeof mathScaled === 'number' &&
+    typeof scienceScaled === 'number'
+      ? Math.round((mathScaled + scienceScaled) / 2)
+      : null;
+
   return (
     <Card>
       <CardHeader>
@@ -37,6 +48,15 @@ export function AttemptSummary({ snapshot }: { snapshot: AttemptSnapshot }) {
               {snapshot.composite ?? '—'}
               <span className="ml-1 text-xs text-slate-400">/ 36</span>
             </div>
+            <div className="mt-1 text-xs text-slate-400">
+              avg of English, Reading &amp; Math
+            </div>
+            {stem !== null && (
+              <div className="mt-1 text-xs text-slate-600">
+                STEM <span className="font-semibold text-slate-800">{stem}</span>
+                <span className="text-slate-400"> / 36 · Math + Science</span>
+              </div>
+            )}
           </div>
           <div className="text-right text-xs text-slate-500">
             <div>Started: {formatDate(snapshot.started_at)}</div>
@@ -64,6 +84,11 @@ export function AttemptSummary({ snapshot }: { snapshot: AttemptSnapshot }) {
                 <div className="text-2xl font-semibold text-slate-800">{scaled ?? '—'}</div>
                 {raw !== undefined && (
                   <div className="text-xs text-slate-500">raw {raw}</div>
+                )}
+                {s === 'science' && (
+                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-amber-600">
+                    not in composite
+                  </div>
                 )}
               </div>
             );
